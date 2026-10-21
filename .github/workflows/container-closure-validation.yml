@@ -28,7 +28,7 @@ jobs:
         run: test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
       - run: npm ci --no-audit --no-fund
       - name: Runtime closure and distribution regression tests
-        run: node --test scripts/tests/container-runtime.test.mjs scripts/tests/container-image-size-budget.test.mjs scripts/tests/public-docker-distribution.test.mjs
+        run: node --test scripts/tests/container-runtime.test.mjs scripts/tests/container-smoke.test.mjs scripts/tests/container-image-size-budget.test.mjs scripts/tests/public-docker-distribution.test.mjs scripts/tests/public-workflows.test.mjs scripts/tests/public-export.test.mjs
       - run: npm run check
       - run: npm run build
       - name: Prepare real Linux runtime trees
@@ -53,3 +53,73 @@ jobs:
           node --input-type=module -e 'await import("@space/browser-host"); await import("@space/db")'
           cd "$RUNNER_TEMP/runtime-cli"
           node --input-type=module -e 'await import("@space/cli-host")'
+  images:
+    needs: runtime
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.23.4
+      - name: Verify exact source and record actual runner resources
+        env:
+          SOURCE_REVISION: ${{ inputs.revision }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
+          nproc
+          free -m
+          df -h "$RUNNER_TEMP"
+          ls -l /dev/kvm || true
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+      - name: Build every image, measure and run the real service on this native architecture
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          failures=0
+          for target in core browser cli; do
+            echo "::group::Build $target / $ARCH"
+            docker buildx build --platform "linux/$ARCH" --target "$target" --tag "spaceapp-ci:$target-$ARCH" --load --provenance=false --progress=plain .
+            echo "::endgroup::"
+            if ! node scripts/container-image-size-budget.mjs --target "$target" --image "spaceapp-ci:$target-$ARCH"; then failures=1; fi
+            if ! node scripts/container-smoke.mjs --target "$target" --image "spaceapp-ci:$target-$ARCH"; then failures=1; fi
+          done
+          exit "$failures"
+      - name: Scan core image with the upstream blocking policy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: spaceapp-ci:core-${{ matrix.arch }}
+          severity: MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+          cache: false
+      - name: Scan browser image with the upstream blocking policy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: spaceapp-ci:browser-${{ matrix.arch }}
+          severity: MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+          cache: false
+      - name: Scan CLI image with the upstream blocking policy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: spaceapp-ci:cli-${{ matrix.arch }}
+          severity: MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+          cache: false
