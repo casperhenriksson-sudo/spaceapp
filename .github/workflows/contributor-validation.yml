@@ -46,6 +46,8 @@ jobs:
           elapsed=$(( $(date +%s) - started ))
           printf 'Temporal sandbox and replay file: %s seconds\n' "$elapsed" >> "$GITHUB_STEP_SUMMARY"
           test "$elapsed" -lt 180
+      - name: Check the deterministic API watchdog fixture
+        run: npm exec -w @space/api -- vitest run tests/room-watchdog.test.ts
       - run: npm run hygiene:preflight
 
   public-quality:
