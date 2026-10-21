@@ -404,10 +404,22 @@ export async function runScenario(h: TemporalSandbox, scenario: Scenario) {
       new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error(`Scenario timed out: ${scenario.name}`)), 45_000); })
     ]);
   } catch (error) {
-    for (const handle of h.handles) {
-      const history = await handle.fetchHistory();
-      console.error("Synthetic scenario diagnostic", scenario.name, JSON.stringify(history.events?.slice(-24)));
-    }
+    // Diagnostics must neither replace the scenario failure nor delay teardown
+    // indefinitely when the disposable server has stopped responding.
+    await Promise.all(h.handles.map(async handle => {
+      let diagnosticTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const history = await Promise.race([
+          handle.fetchHistory(),
+          new Promise<never>((_, reject) => {
+            diagnosticTimer = setTimeout(() => reject(Error("Diagnostic history fetch timed out")), 1_000);
+          })
+        ]);
+        console.error("Synthetic scenario diagnostic", scenario.name, JSON.stringify(history.events?.slice(-24)));
+      } catch (diagnosticError) {
+        console.error("Synthetic scenario diagnostic unavailable", scenario.name, handle.workflowId, diagnosticError);
+      } finally { clearTimeout(diagnosticTimer); }
+    }));
     throw error;
   } finally { clearTimeout(timer); await h.close(); }
 }
