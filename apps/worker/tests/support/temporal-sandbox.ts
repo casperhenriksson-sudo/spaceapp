@@ -103,12 +103,12 @@ export class TemporalSandbox {
     this.calls = [];
   }
 
-  async start(type: string, input: unknown, legacy = false) {
+  async start(type: string, input: unknown, legacy = false, workflowId?: string) {
     if (legacy) await this.ensureWorker("sandbox-legacy");
     if (type === "memoryMaintenanceWorkflow") await this.ensureWorker("space-memory-maintenance");
     if (type === "memoryMaintenanceWorkflow" || type === "memoryConsolidationWorkflow") await this.ensureWorker("space-memory-mutations");
     const handle = await this.env.client.workflow.start(type, {
-      workflowId: `synthetic-${type}-${++this.serial}`,
+      workflowId: workflowId ?? `synthetic-${type}-${++this.serial}`,
       taskQueue: legacy ? "sandbox-legacy" : "sandbox", args: [input]
     });
     this.handles.push(handle);

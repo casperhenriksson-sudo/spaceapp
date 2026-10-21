@@ -165,6 +165,17 @@ export const scenarios: Scenario[] = [
   } }
 ];
 
+scenarios.push({ name: "room action failure derives the legacy action id from the real workflow id", async run(h) {
+  h.reset({ runRoomAgentBackgroundAction: () => { throw failure("ACTION_FAILED", true); }, failRoomAgentBackgroundAction: () => undefined });
+  const handle = await h.start("roomAgentActionWorkflow", {
+    bridge: { roomId: "room:proof", missionId: "mission:proof" }, traceId: "trace:proof"
+  }, false, "space-room-action:action:legacy");
+  await assert.rejects(handle.result(), error => failureTypes(error).includes("ACTION_FAILED"));
+  assert.deepEqual(h.calls.find(c => c.name === "failRoomAgentBackgroundAction")!.args[0], {
+    roomId: "room:proof", missionId: "mission:proof", actionId: "action:legacy", cancelled: false
+  });
+} });
+
 function continuationDriver(h: TemporalSandbox) {
   const c = continuationFixture();
   const prepared: any[] = [];
@@ -352,7 +363,7 @@ for (const legacy of [false, true]) {
       assert.equal(carried.pending.length, 1); assert.equal(carried.pending[0]!.missionId, "mission:2");
       assert.equal(carried.processedCount, 0);
       // The current implementation carries stopped items; the legacy implementation
-      // intentionally clears them at this historical boundary. Replay freezes both.
+      // historically clears them at this boundary. Replay freezes both.
       assert.equal(carried.interrupted.length, legacy ? 0 : 1);
     } },
     { name: `${branch} supervisor uses 1-second polls and carries monitoring state after 250 polls`, async run(h) {

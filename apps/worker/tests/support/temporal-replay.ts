@@ -32,10 +32,11 @@ export async function assertReplay(bundle: WorkflowBundleWithSourceMap) {
   assert(legacy.length > 0, "Missing genuine pre-patch supervisor history");
   for (const { history } of legacy) assert(!history.events.some((e: any) => e.markerRecordedEventAttributes), "Legacy history must not contain a synthetic patch marker");
   const failures: string[] = [];
+  const workflowTypes = new Map(histories.map(({ workflowId, history }) => [workflowId, history.events[0].workflowExecutionStartedEventAttributes.workflowType.name]));
   let count = 0;
   for await (const replay of Worker.runReplayHistories({ workflowBundle: bundle }, histories)) {
     count++;
-    if (replay.error) failures.push(`${replay.workflowId} (${replay.runId}): ${replay.error.name}: ${replay.error.message}`);
+    if (replay.error) failures.push(`${workflowTypes.get(replay.workflowId)} in ${replay.workflowId} (${replay.runId}): ${replay.error.name}: ${replay.error.message}`);
   }
   assert.equal(count, histories.length, "Every committed fixture must be replayed");
   assert.deepEqual(failures, [], `Workflow replay is incompatible:\n${failures.join("\n")}`);
