@@ -92,6 +92,21 @@ test("prefix-only Node builtins such as node:sqlite are not treated as npm depen
   assert.equal(productionClosure(root, traced.dependencies).size, 0);
 });
 
+for (const [arch, retained] of [["x64", "x86_64-unknown-linux-gnu"], ["arm64", "aarch64-unknown-linux-gnu"]]) {
+  test(`Linux ${arch} runtime retains its Temporal native bridge and excludes foreign binaries`, async context => {
+    const { root, parent, put, pkg } = fixture(context);
+    put("entry.mjs", 'import "@temporalio/core-bridge";\n');
+    pkg("node_modules/@temporalio/core-bridge", { name: "@temporalio/core-bridge" });
+    const releases = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-pc-windows-msvc", "x86_64-apple-darwin", "aarch64-apple-darwin"];
+    for (const target of releases) put(`node_modules/@temporalio/core-bridge/releases/${target}/index.node`, target);
+    put("node_modules/@temporalio/core-bridge/LICENSE", "native license");
+    const output = join(parent, "runtime");
+    await prepareRuntime({ root, output, target: "core", platform: "linux", arch, build, entrypoints: [join(root, "entry.mjs")] });
+    for (const target of releases) assert.equal(existsSync(join(output, `node_modules/@temporalio/core-bridge/releases/${target}/index.node`)), target === retained);
+    assert.equal(readFileSync(join(output, "node_modules/@temporalio/core-bridge/LICENSE"), "utf8"), "native license");
+  });
+}
+
 test("dependency symlinks cannot copy outside the checkout", context => {
   const { parent, root } = fixture(context);
   const external = join(parent, "external");

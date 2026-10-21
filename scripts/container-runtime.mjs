@@ -118,7 +118,7 @@ export async function prepareRuntime({ root, output, target, build, entrypoints,
   }
   mkdirSync(dirname(output), { recursive: true });
   mkdirSync(output);
-  function copy(source, destination = slash(relative(root, source)), dependency = false) {
+  function copy(source, destination = slash(relative(root, source)), dependency = null) {
     const absolute = resolve(source);
     const dest = resolve(output, destination);
     if (!inside(root, absolute) || !inside(output, dest)) throw new Error("Runtime copy escaped its source or destination");
@@ -127,6 +127,16 @@ export async function prepareRuntime({ root, output, target, build, entrypoints,
       const local = slash(relative(absolute, path));
       if (/\.(?:js|mjs|cjs|css)\.map$/.test(path)) return false;
       if (dependency && (local === "node_modules" || local.startsWith("node_modules/"))) return false;
+      if (dependency?.name === "@temporalio/core-bridge") {
+        // The pinned SDK ships all five native release binaries in one npm
+        // package. Debian images load exactly their current GNU/Linux target.
+        const targets = {
+          "linux-x64": "x86_64-unknown-linux-gnu", "linux-arm64": "aarch64-unknown-linux-gnu",
+          "win32-x64": "x86_64-pc-windows-msvc", "darwin-x64": "x86_64-apple-darwin", "darwin-arm64": "aarch64-apple-darwin"
+        };
+        const release = local.match(/^releases\/([^/]+)(?:\/|$)/)?.[1];
+        if (release && Object.values(targets).includes(release) && release !== targets[`${platform}-${arch}`]) return false;
+      }
       if (dependency && /(?:^|\/)prebuilds\/[^/]+/.test(local)) {
         const candidate = local.match(/(?:^|\/)prebuilds\/([^/]+)/)[1];
         if (/^(linux|darwin|win32)-(x64|arm64|ia32)(?:$|-)/.test(candidate) && !candidate.startsWith(`${platform}-${arch}`)) return false;
@@ -143,7 +153,7 @@ export async function prepareRuntime({ root, output, target, build, entrypoints,
     mkdirSync(dirname(link), { recursive: true });
     symlinkSync(platform === "win32" ? join(output, directory) : relative(dirname(link), join(output, directory)), link, platform === "win32" ? "junction" : "dir");
   }
-  for (const path of dependencies.keys()) copy(path, slash(relative(root, path)), true);
+  for (const [path, manifest] of dependencies) copy(path, slash(relative(root, path)), manifest);
   const assets = ["deploy/docker", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"];
   if (target === "core") assets.push("apps/web/dist", "apps/web/public", "packages/db/migrations", "packages/gateway/grammars", "agent-skills");
   if (target === "browser" && workspaces.has("packages/db")) assets.push("packages/db/migrations");
