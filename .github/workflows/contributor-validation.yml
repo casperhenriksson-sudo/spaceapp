@@ -38,11 +38,11 @@ jobs:
           npm exec -w @space/worker -- tsc --noEmit --target ES2022
           --module NodeNext --moduleResolution NodeNext --skipLibCheck
           --esModuleInterop --strict --types node
-          tests/temporal-sandbox.test.ts tests/record-workflow-histories.ts
+          tests/temporal-sandbox.test.ts tests/temporal-scenario-cleanup.test.ts tests/record-workflow-histories.ts
       - name: Real sandbox, all histories, negative gate and three-minute budget
         run: |
           started=$(date +%s)
-          npm exec -w @space/worker -- vitest run tests/temporal-sandbox.test.ts
+          npm exec -w @space/worker -- vitest run tests/temporal-sandbox.test.ts tests/temporal-scenario-cleanup.test.ts
           elapsed=$(( $(date +%s) - started ))
           printf 'Temporal sandbox and replay file: %s seconds\n' "$elapsed" >> "$GITHUB_STEP_SUMMARY"
           test "$elapsed" -lt 180
