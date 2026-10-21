@@ -1,0 +1,88 @@
+name: Contributor Temporal bounty validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Exact contribution commit to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+jobs:
+  temporal-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: |
+          test "$(git rev-parse HEAD)" = '${{ inputs.revision }}'
+          node --version
+          uname -a
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - name: Strict typecheck of the new test and recording sources
+        run: >-
+          npm exec -w @space/worker -- tsc --noEmit --target ES2022
+          --module NodeNext --moduleResolution NodeNext --skipLibCheck
+          --esModuleInterop --strict --types node
+          tests/temporal-sandbox.test.ts tests/record-workflow-histories.ts
+      - name: Real sandbox, all histories, negative gate and three-minute budget
+        run: |
+          started=$(date +%s)
+          npm exec -w @space/worker -- vitest run tests/temporal-sandbox.test.ts
+          elapsed=$(( $(date +%s) - started ))
+          printf 'Temporal sandbox and replay file: %s seconds\n' "$elapsed" >> "$GITHUB_STEP_SUMMARY"
+          test "$elapsed" -lt 180
+      - run: npm run hygiene:preflight
+
+  public-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: test "$(git rev-parse HEAD)" = '${{ inputs.revision }}'
+      - name: Record the upstream provenance limitation without changing its gate
+        run: |
+          if node scripts/verify-export-provenance.mjs .; then
+            echo 'Upstream export provenance passed.'
+          else
+            echo 'Outside contribution: upstream issue #60 explicitly excludes this expected provenance failure.'
+          fi
+      - name: Create the same sanitized candidate as upstream CI
+        run: node scripts/public-export.mjs --output "$RUNNER_TEMP/spaceapp-public-export"
+      - name: Confirm every history survives export unchanged
+        run: |
+          for file in apps/worker/tests/fixtures/workflow-histories/*.json; do
+            cmp "$file" "$RUNNER_TEMP/spaceapp-public-export/$file"
+          done
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep ffmpeg
+      - run: npm ci --no-audit --no-fund
+        working-directory: ${{ runner.temp }}/spaceapp-public-export
+      - run: npm run test:public
+        working-directory: ${{ runner.temp }}/spaceapp-public-export
+      - run: npm run check
+        working-directory: ${{ runner.temp }}/spaceapp-public-export
+      - run: npm run build
+        working-directory: ${{ runner.temp }}/spaceapp-public-export
+      - run: npm run pack:dry-run -w run-spaceapp
+        working-directory: ${{ runner.temp }}/spaceapp-public-export
