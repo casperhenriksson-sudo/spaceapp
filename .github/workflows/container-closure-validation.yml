@@ -6,6 +6,14 @@ on:
         description: Exact contribution source commit
         required: true
         type: string
+      full_stack:
+        description: Run the real large-profile launcher in an isolated Linux VM
+        type: boolean
+        default: false
+      full_public:
+        description: Validate the complete sanitized public candidate
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -31,6 +39,7 @@ jobs:
         run: node --test scripts/tests/container-runtime.test.mjs scripts/tests/container-smoke.test.mjs scripts/tests/container-image-size-budget.test.mjs scripts/tests/public-docker-distribution.test.mjs scripts/tests/public-workflows.test.mjs scripts/tests/public-export.test.mjs
       - run: npm run check
       - run: npm run build
+      - run: npm run hygiene:preflight
       - name: Prepare real Linux runtime trees
         run: |
           for target in core browser cli; do
@@ -123,3 +132,58 @@ jobs:
           exit-code: "1"
           format: table
           cache: false
+      - name: Load immutable verification tools from fork main
+        if: inputs.full_stack && matrix.arch == 'amd64'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: casperhenriksson-sudo/spaceapp
+          ref: 8b38be25586b71ad8166a6353f55ab69dca1754b
+          path: _verification-tools
+          persist-credentials: false
+      - name: Real Linux large-profile install, owner setup, CLI, browser and cleanup
+        if: inputs.full_stack && matrix.arch == 'amd64'
+        run: bash _verification-tools/.github/verification/container-stack-vm.sh "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/_verification-tools/.github/verification"
+  public-quality:
+    if: inputs.full_public
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.23.4
+      - name: Verify exact source
+        env:
+          SOURCE_REVISION: ${{ inputs.revision }}
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
+      - name: Record upstream export provenance separately from validation
+        run: |
+          if node scripts/verify-export-provenance.mjs .; then
+            echo 'Upstream export provenance passed.'
+          else
+            echo 'Advisory only: issue 64 documents the outside-contributor provenance limitation. The upstream gate is unchanged.'
+          fi
+      - name: Export the public candidate and preserve the reviewed packaging helpers
+        run: |
+          node scripts/public-export.mjs --output "$RUNNER_TEMP/spaceapp-public-export"
+          for file in scripts/container-runtime.mjs scripts/container-smoke.mjs scripts/tests/container-runtime.test.mjs scripts/tests/container-smoke.test.mjs; do
+            cmp "$file" "$RUNNER_TEMP/spaceapp-public-export/$file"
+          done
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep ffmpeg
+      - run: npm ci --no-audit --no-fund
+        working-directory: ${{ runner.temp }}/spaceapp-public-export
+      - run: npm audit --audit-level=high
+        working-directory: ${{ runner.temp }}/spaceapp-public-export
+      - run: npm run test:public
+        working-directory: ${{ runner.temp }}/spaceapp-public-export
+      - run: npm run check
+        working-directory: ${{ runner.temp }}/spaceapp-public-export
+      - run: npm run build
+        working-directory: ${{ runner.temp }}/spaceapp-public-export
+      - run: npm run pack:dry-run -w run-spaceapp
+        working-directory: ${{ runner.temp }}/spaceapp-public-export
