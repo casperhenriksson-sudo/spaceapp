@@ -48,7 +48,7 @@ export async function smokeImage({ target, image, root = repositoryRoot, execute
   let networkCreated = false;
   let failure;
   const cleanupErrors = [];
-  const report = { target, image, started: false, runtimeUid: null, ready: false, socket: false, chromium: false, cleaned: false };
+  const report = { target, image, started: false, runtimeUid: null, ready: false, socket: false, chromium: false, xvfbAvailable: false, cleaned: false };
   const docker = async (args, options = {}) => (await execute("docker", args, { encoding: "utf8", timeout: 180_000, maxBuffer: 8 * 1024 * 1024, ...options })).stdout.trim();
   const nodeIn = (container, code) => docker(["exec", "--user", "10001:10001", container, "node", "--input-type=module", "-e", code], { timeout: 30_000 });
   try {
@@ -104,6 +104,9 @@ export async function smokeImage({ target, image, root = repositoryRoot, execute
       }, `${target} host's real socket`);
       report.socket = true;
       if (target === "browser") {
+        // Real browser panes start headed Chrome through this display server.
+        await nodeIn(main, 'import fs from "node:fs"; fs.accessSync("/usr/bin/Xvfb", fs.constants.X_OK);');
+        report.xvfbAvailable = true;
         const html = await docker(["exec", "--user", "10001:10001", main, "/usr/bin/chromium", "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--dump-dom", "data:text/html,<title>SpaceApp container smoke</title>"]);
         assert.match(html, /<title>SpaceApp container smoke<\/title>/);
         report.chromium = true;

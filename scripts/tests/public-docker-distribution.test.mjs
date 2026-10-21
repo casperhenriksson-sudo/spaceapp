@@ -30,6 +30,9 @@ test("public Dockerfile provides native multi-arch core, browser, and redistribu
     3,
     "build, runtime, and browser apt transactions must explicitly install patched liblzma5"
   );
+  const browserStage = dockerfile.match(/FROM runtime-base AS browser([\s\S]*?)(?=\nFROM |\s*$)/)?.[1] || "";
+  assert.match(browserStage, /apt-get install -y --no-install-recommends[^&]*\bxvfb\b/,
+    "default browser panes require Xvfb as well as headless Chromium");
   assert.match(dockerfile, /ARG TARGETARCH/);
   assert.match(dockerfile, /ARG NPM_VERSION=11\.18\.0/);
   assert.match(
