@@ -33,7 +33,7 @@
     "fast-json-stringify@7": {
       "fast-uri": "4.2.2"
     },
-    "sanitize-html": "2.17.7",
+    "sanitize-html": "2.18.0",
     "@fastify/busboy": "3.2.2",
     "hono": "4.13.7",
     "qs": "6.16.0",
