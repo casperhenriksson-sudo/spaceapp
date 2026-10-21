@@ -22,7 +22,7 @@ owned_live_qemu() {
 }
 cleanup() {
   if [[ -f "$vm_root/qemu.pid" ]]; then
-    qemu_pid=$(cat "$vm_root/qemu.pid")
+    qemu_pid=$(sudo cat "$vm_root/qemu.pid")
     if owned_live_qemu; then
       sudo kill "$qemu_pid" 2>/dev/null || true
       for attempt in {1..20}; do
@@ -95,7 +95,7 @@ sudo qemu-system-x86_64 -machine q35 -accel "$acceleration" -cpu "$cpu_model" -s
 connected=0
 for attempt in {1..120}; do
   if ssh "${ssh_options[@]}" "$guest" true > /dev/null 2> "$vm_root/ssh-startup.log"; then connected=1; break; fi
-  qemu_pid=$(cat "$vm_root/qemu.pid")
+  qemu_pid=$(sudo cat "$vm_root/qemu.pid")
   if ! sudo kill -0 "$qemu_pid" 2>/dev/null; then echo 'Guest VM exited before SSH was available.' >&2; exit 1; fi
   sleep 5
 done
