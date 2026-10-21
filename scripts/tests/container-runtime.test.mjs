@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
-import { findInstalledPackage, prepareRuntime, productionClosure, runtimeEntrypoints } from "../container-runtime.mjs";
+import { findInstalledPackage, prepareRuntime, productionClosure, runtimeEntrypoints, traceRuntime } from "../container-runtime.mjs";
 
 const { build } = createRequire(new URL("../../packages/gateway/package.json", import.meta.url))("esbuild");
 function fixture(context) {
@@ -81,6 +81,15 @@ test("production closure rejects a missing required dependency and retains requi
   pkg("node_modules/peer", { name: "peer" });
   assert.deepEqual([...productionClosure(root, [{ name: "consumer", issuer: root }]).values()].map(p => p.name).sort(), ["consumer", "peer"]);
   assert.throws(() => productionClosure(root, [{ name: "missing", issuer: root }]), /Missing production dependency missing/);
+});
+
+test("prefix-only Node builtins such as node:sqlite are not treated as npm dependencies", async context => {
+  const { root, put } = fixture(context);
+  put("apps/api/package.json", { name: "@space/api", type: "module" });
+  put("apps/api/dist/server.js", 'import "node:sqlite"; import "node:test";\n');
+  const traced = await traceRuntime(root, [join(root, "apps/api/dist/server.js")], build);
+  assert.deepEqual(traced.dependencies, []);
+  assert.equal(productionClosure(root, traced.dependencies).size, 0);
 });
 
 test("dependency symlinks cannot copy outside the checkout", context => {

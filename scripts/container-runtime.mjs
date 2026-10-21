@@ -2,12 +2,11 @@
 // Trace application imports without rewriting their code or import.meta URLs.
 // Resolve external production dependencies from their original issuer, retaining
 // nested versions, installed optional native packages and required peers.
-import { builtinModules, createRequire } from "node:module";
+import { createRequire, isBuiltin } from "node:module";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const builtins = new Set(builtinModules.flatMap(name => [name, `node:${name}`]));
 const json = path => JSON.parse(readFileSync(path, "utf8"));
 const slash = path => path.split(sep).join("/");
 const inside = (root, path) => path === root || (!relative(root, path).startsWith(`..${sep}`) && relative(root, path) !== ".." && !isAbsolute(relative(root, path)));
@@ -93,7 +92,7 @@ export async function traceRuntime(root, entrypoints, build) {
     if (!inside(root, path)) throw new Error(`Runtime source escapes checkout: ${input}`);
     files.add(path);
     for (const imported of metadata.imports) {
-      if (imported.external && !builtins.has(imported.path)) dependencies.push({ name: packageName(imported.path), issuer: dirname(path) });
+      if (imported.external && !isBuiltin(imported.path)) dependencies.push({ name: packageName(imported.path), issuer: dirname(path) });
     }
   }
   return { files, dependencies };
