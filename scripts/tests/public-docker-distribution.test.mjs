@@ -38,7 +38,12 @@ test("public Dockerfile provides native multi-arch core, browser, and redistribu
   );
   assert.match(dockerfile, /await r\.json\(\)/);
   assert.match(dockerfile, /body\.ok !== true/);
-  assert.match(dockerfile, /rotate-owner-setup-token\.mjs/);
+  const runtimePreparer = await readFile(join(root, "scripts/container-runtime.mjs"), "utf8");
+  assert.match(runtimePreparer, /"rotate-owner-setup-token"/);
+  for (const target of ["core", "browser", "cli"]) {
+    assert.match(dockerfile, new RegExp(`COPY --from=build --chown=spaceapp:spaceapp /runtime/${target}/ \\.\\/`));
+  }
+  assert.doesNotMatch(dockerfile, /COPY --from=build[^\n]*\/app\/(?:node_modules|apps|packages) /);
   assert.match(dockerfile, /opencode-ai@1\.18\.4/);
   assert.doesNotMatch(dockerfile, /@openai\/codex|@google\/gemini-cli|@anthropic-ai\/claude-code|run-deepseek-cli/);
   const installer = await readFile(join(root, "deploy/docker/provider-install.mjs"), "utf8");
