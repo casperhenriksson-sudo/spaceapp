@@ -6,6 +6,11 @@ on:
         description: Exact contribution source commit
         required: true
         type: string
+      source_only:
+        description: Run source validation only (public candidate validated separately)
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
 env:
@@ -30,7 +35,15 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
           node --version
           uname -a
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep ffmpeg
+      - name: Verify required real rg and ffmpeg tools (install only when missing)
+        timeout-minutes: 10
+        run: |
+          if ! command -v rg >/dev/null || ! command -v ffmpeg >/dev/null; then
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y -qq ripgrep ffmpeg
+          fi
+          rg --version
+          ffmpeg -version
       - run: npm ci --no-audit --no-fund
       - run: npm run check
       - name: Strictly typecheck tracing tests and local proof source
@@ -44,6 +57,7 @@ jobs:
       - run: npm run build
       - run: npm run hygiene:preflight
   public-quality:
+    if: ${{ !inputs.source_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -68,7 +82,15 @@ jobs:
           fi
       - name: Create the same sanitized public candidate as upstream CI
         run: node scripts/public-export.mjs --output "$RUNNER_TEMP/spaceapp-public-export"
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep ffmpeg
+      - name: Verify required real rg and ffmpeg tools (install only when missing)
+        timeout-minutes: 10
+        run: |
+          if ! command -v rg >/dev/null || ! command -v ffmpeg >/dev/null; then
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y -qq ripgrep ffmpeg
+          fi
+          rg --version
+          ffmpeg -version
       - run: npm ci --no-audit --no-fund
         working-directory: ${{ runner.temp }}/spaceapp-public-export
       - run: npm run test:public
