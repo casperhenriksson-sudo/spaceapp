@@ -5,7 +5,7 @@ permissions: {}
 jobs:
   prerequisites:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Inspect standard runner tools and public package sources
         run: |
@@ -22,3 +22,10 @@ jobs:
           result=$?
           printf 'Package-index exit status: %s\n' "$result"
           exit "$result"
+      - name: Verify complete unattended proof-tool installation
+        run: |
+          sudo timeout --kill-after=10s 300s env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Dpkg::Use-Pty=0 install -y --no-install-recommends ripgrep ffmpeg qemu-system-x86 qemu-utils cloud-image-utils
+          command -v rg ffmpeg qemu-system-x86_64 qemu-img cloud-localds
+          rg --version
+          ffmpeg -version
+          qemu-system-x86_64 --version
