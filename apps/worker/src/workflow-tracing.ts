@@ -25,9 +25,9 @@ export interface WorkflowTraceSinks extends Sinks {
 /** No I/O, random numbers, new activities or business-input mutation in this module. */
 export function interceptors(): WorkflowInterceptors {
   const sink = proxySinks<WorkflowTraceSinks>().spaceTracing;
-  const info = workflowInfo();
-  const spanId = executionSpanId(info.runId);
-  let traceId = executionTraceId(info.runId);
+  const initial = workflowInfo();
+  const spanId = executionSpanId(initial.runId);
+  let traceId = executionTraceId(initial.runId);
   let parentSpanId: string | null = null;
   let flags = "01";
   let links: TraceLink[] = [];
@@ -46,6 +46,9 @@ export function interceptors(): WorkflowInterceptors {
   return {
     inbound: [{
       async execute(input, next) {
+        // Temporal decodes memo after creating the interceptor factory. Read
+        // the current info here; the factory's earlier snapshot has no memo.
+        const info = workflowInfo();
         const correlation = workflowCorrelation(input.args);
         ids = correlation.ids;
         const header = readTraceCarrier(input.headers);

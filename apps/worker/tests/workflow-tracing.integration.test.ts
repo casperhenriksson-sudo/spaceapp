@@ -220,7 +220,8 @@ describe("real Temporal workflow to OTLP HTTP collector", () => {
     try {
       await active.runUntil(async () => {
         await environment.client.workflow.execute("memoryMaintenanceWorkflow", { taskQueue, workflowId,
-          args: [{ traceId: "req:memory", traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" }] });
+          args: [{ scheduledAt: "2026-10-22T12:00:00.000Z", traceId: "req:memory" }],
+          memo: { traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" } });
       });
       await spanExporter.flush();
       const parent = spans().find(span => span.name === "workflow memoryMaintenanceWorkflow")!;
