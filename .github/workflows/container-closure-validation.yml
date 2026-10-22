@@ -142,7 +142,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: casperhenriksson-sudo/spaceapp
-          ref: 37b3989b2f21894fc2304f119c64f910074284fc
+          ref: 142ff85ea77f60881bd6d2a7a3ec9c1a09f541b5
           path: _verification-tools
           persist-credentials: false
       - name: Real Linux large-profile install, owner setup, CLI, browser and cleanup
