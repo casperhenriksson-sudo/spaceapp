@@ -11,7 +11,7 @@ test("public container size budgets preserve the lightweight release ceilings", 
   assert.deepEqual(containerImageSizeBudgets, {
     core: 815 * mebibyte,
     browser: 1130 * mebibyte,
-    cli: 795 * mebibyte
+    cli: 690 * mebibyte
   });
 });
 
