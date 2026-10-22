@@ -111,6 +111,9 @@ ssh "${ssh_options[@]}" "$guest" 'sudo cloud-init status --wait; docker version;
 docker save spaceapp-ci:core-amd64 spaceapp-ci:browser-amd64 spaceapp-ci:cli-amd64 | ssh "${ssh_options[@]}" "$guest" 'docker load'
 docker run --rm --network none --entrypoint cat spaceapp-ci:core-amd64 /usr/local/bin/node | ssh "${ssh_options[@]}" "$guest" 'cat > /tmp/proof-node && sudo install -m 0755 /tmp/proof-node /usr/local/bin/node && rm /tmp/proof-node'
 tar -C "$source_root" -cf - packages/run-spaceapp scripts/container-smoke.mjs | ssh "${ssh_options[@]}" "$guest" 'mkdir -p /tmp/spaceapp-source && tar -xf - -C /tmp/spaceapp-source'
+# Reuse the exact WebSocket client already shipped by the tested core image.
+# This is a test-only UI client, not an extra package in the application images.
+docker run --rm --network none --entrypoint tar spaceapp-ci:core-amd64 -C /app/node_modules -cf - ws | ssh "${ssh_options[@]}" "$guest" 'mkdir -p /tmp/spaceapp-source/node_modules && tar -xf - -C /tmp/spaceapp-source/node_modules'
 cat "$tools_root/container-stack-proof.mjs" | ssh "${ssh_options[@]}" "$guest" 'cat > /tmp/container-stack-proof.mjs'
 source_revision=$(git -C "$source_root" rev-parse HEAD)
 if [[ ! "$source_revision" =~ ^[a-f0-9]{40}$ ]]; then echo 'Could not identify tested source.' >&2; exit 1; fi
