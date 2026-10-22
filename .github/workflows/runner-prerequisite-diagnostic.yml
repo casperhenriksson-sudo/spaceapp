@@ -1,0 +1,24 @@
+name: Disposable runner prerequisite diagnostic
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  prerequisites:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect standard runner tools and public package sources
+        run: |
+          for tool in rg ffmpeg qemu-system-x86_64 qemu-img cloud-localds; do
+            command -v "$tool" || true
+          done
+          cat /etc/os-release
+          grep -hE '^(URIs|Suites|Components):|^deb ' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+          apt-cache policy ripgrep ffmpeg qemu-system-x86 cloud-image-utils
+      - name: Bound an actual Ubuntu package-index request
+        run: |
+          set +e
+          sudo timeout --kill-after=5s 90s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update
+          result=$?
+          printf 'Package-index exit status: %s\n' "$result"
+          exit "$result"
