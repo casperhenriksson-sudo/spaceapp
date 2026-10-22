@@ -1,0 +1,67 @@
+name: Contributor release source compatibility
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Exact contribution source commit
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  release-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.23.4
+      - name: Verify exact source
+        env:
+          SOURCE_REVISION: ${{ inputs.revision }}
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
+      - name: Export exact public release source
+        run: node scripts/public-export.mjs --output "$RUNNER_TEMP/spaceapp-public-export"
+      - name: Report image build input differences separately from security validation
+        run: |
+          node --input-type=module <<'NODE'
+          import {execFileSync} from 'node:child_process';
+          import {readFileSync,existsSync} from 'node:fs';
+          import {join} from 'node:path';
+          const exported=join(process.env.RUNNER_TEMP,'spaceapp-public-export');
+          const files=execFileSync('git',['ls-files','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);
+          const runtimeInput=p=>/^(Dockerfile|\.dockerignore|package(?:-lock)?\.json|tsconfig\.base\.json)$/.test(p)||
+            /^(deploy\/docker|starter-memory|agent-skills|apps\/web\/public)\//.test(p)||
+            /^(LICENSE|NOTICE|THIRD_PARTY_NOTICES\.md)$/.test(p)||
+            /^(?:apps|packages)\/[^/]+\/(?:package\.json|tsconfig[^/]*\.json|(?:src|scripts|grammars|migrations|bin|templates)\/)/.test(p)||
+            p==='apps/web/server.mjs'||/^scripts\/(container-runtime|build-demo-projects|fix-build-permissions|reset-owner-password|rotate-owner-setup-token|portable-backup|portable-restore)\.mjs$/.test(p);
+          const inputs=files.filter(runtimeInput);
+          const missing=inputs.filter(p=>!existsSync(join(exported,p)));
+          const changed=inputs.filter(p=>existsSync(join(exported,p))&&!readFileSync(p).equals(readFileSync(join(exported,p))));
+          console.log(JSON.stringify({sourceRevision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),checkedInputCount:inputs.length,missingInputs:missing,changedInputs:changed}));
+          NODE
+      - name: Install sanitized candidate dependencies
+        run: npm ci --no-audit --no-fund
+        working-directory: ${{ runner.temp }}/spaceapp-public-export
+      - name: Audit sanitized candidate
+        run: npm audit --audit-level=high
+        working-directory: ${{ runner.temp }}/spaceapp-public-export
+      - name: Build sanitized candidate before the release source scan
+        run: npm run build
+        working-directory: ${{ runner.temp }}/spaceapp-public-export
+      - name: Block fixable source vulnerabilities with the release workflow policy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: fs
+          scan-ref: ${{ runner.temp }}/spaceapp-public-export
+          format: table
+          severity: MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          cache: false
