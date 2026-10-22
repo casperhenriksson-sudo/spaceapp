@@ -4,12 +4,12 @@ import { pathToFileURL } from "node:url";
 
 const mebibyte = 1024 * 1024;
 
-// Native Ubuntu measurements for per-service closures at ec5dc4e (MiB):
+// Native Ubuntu measurements for per-service closures at 6072706 (MiB):
 //                 core    browser    cli
-// linux/amd64     770.5    1078.6    770.1
-// linux/arm64     791.0    1107.8    635.2
-// https://github.com/casperhenriksson-sudo/spaceapp/actions/runs/39691361715
-// Each service gets about 25 MiB above its larger measured architecture, below
+// linux/amd64     770.5    1081.7    770.1
+// linux/arm64     791.0    1111.5    635.2
+// https://github.com/casperhenriksson-sudo/spaceapp/actions/runs/39698748719
+// Each service gets 18-25 MiB above its larger measured architecture, below
 // issue 64's 850 / 1350 / 1000 MiB maximums. Security updates must still pass
 // these ceilings; the PR records final-head measurements and scan results.
 export const containerImageSizeBudgets = Object.freeze({
