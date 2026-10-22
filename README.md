@@ -248,7 +248,7 @@ The launcher selects the largest profile that fits the available CPU, RAM, and f
 
 The service images contain separate runtime dependency trees. CI checks both
 `linux/amd64` and `linux/arm64`, with uncompressed image ceilings of 815 MiB for
-core, 1130 MiB for browser and 795 MiB for CLI. The measured sizes and margins
+core, 1130 MiB for browser and 690 MiB for CLI. The measured sizes and margins
 are recorded in [the image budget check](scripts/container-image-size-budget.mjs).
 These are image-size limits, not compressed download estimates. The installation
 disk requirements above remain unchanged: they also allow for database state,
