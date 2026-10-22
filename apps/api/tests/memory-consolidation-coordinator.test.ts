@@ -4,8 +4,17 @@ import {
   MEMORY_CONSOLIDATION_WORKFLOW_TYPE,
   scheduleMemoryConsolidation
 } from "../src/memory-consolidation-coordinator.js";
+import { createRequestTraceContext, requestTraceContexts } from "../src/trace-context.js";
 
 describe("Memory consolidation coordinator", () => {
+  it("parents an API memory repair to its exported request span through identifier-only memo", async () => {
+    const context = createRequestTraceContext(undefined);
+    requestTraceContexts.remember("req:consolidation", context);
+    await scheduleMemoryConsolidation({ runId: "memory_consolidation:trace", traceId: "req:consolidation" }, "workflow:memory", async (_type, options) => {
+      expect(options.memo).toEqual({ spaceTraceId: "req:consolidation", traceparent: context.traceparent, w3cTraceId: context.w3cTraceId });
+      return { workflowId: options.workflowId };
+    });
+  });
   it("starts a retry-safe workflow on the exclusive maintenance queue", async () => {
     const calls: Array<{ workflowType: string; options: unknown }> = [];
     const input = { runId: "memory_consolidation:run-1", traceId: "trace:memory-consolidation" };

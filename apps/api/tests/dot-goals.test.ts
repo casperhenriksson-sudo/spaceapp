@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { dotGoalStepPrompt, type DotGoal } from "@space/contracts";
 import { SpaceConflictError } from "@space/runtime";
 import { createDotGoalService, DotGoalError, type DotGoalServiceDeps } from "../src/dot-goals.js";
+import { traceContextForRawRequest } from "../src/trace-context.js";
 
 const dotId = `dot:${"a".repeat(32)}`;
 const now = new Date().toISOString();
@@ -69,6 +70,12 @@ function fixture(overrides: { runStatus?: string; pendingApproval?: boolean; sen
 const input = { sessionId: "agent_session:1", objective: "Ship the report", milestones: ["Draft", "Review"], criteria: ["Report published"], budget: { maxSteps: 2 } };
 
 describe("Dot Goals", () => {
+  it("parents an API-started Goal to the actual request span without exporting its objective", async () => {
+    const { service, deps } = fixture();
+    const raw = { headers: { traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" } };
+    const goal = await service.create("user:1", dotId, input, { raw } as never);
+    expect(deps.workflow!.start).toHaveBeenCalledWith(goal.goalId, traceContextForRawRequest(raw).traceparent);
+  });
   it("creates one open Goal per conversation for the owner's Dot and starts its workflow", async () => {
     const { service, deps } = fixture();
     const goal = await service.create("user:1", dotId, input, null);

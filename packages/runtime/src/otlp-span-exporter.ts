@@ -1,11 +1,12 @@
 /**
- * Optional OTLP/HTTP (JSON) export of API server spans and worker activity spans. Off unless
+ * Optional OTLP/HTTP (JSON) export of API server, workflow and activity spans. Off unless
  * SPACE_OTEL_EXPORTER_OTLP_ENDPOINT names a collector base URL (spans go to
  * `<base>/v1/traces`). No dependency, no collector required: Space logs stay
  * joinable by W3C trace id without it.
  *
  * Spans carry only the method, route template, status code, service name and
- * Space request id; never URLs with parameters, headers, bodies or user data.
+ * Space request id, or allowlisted worker identifiers and outcomes; never URLs
+ * with parameters, headers, bodies or user data. Callers own attribute allowlists.
  * Export is best effort: a bounded queue drops (and counts) spans instead of
  * growing, each POST has a timeout, and a failing collector never affects a
  * request.
@@ -22,6 +23,13 @@ export interface ServerSpan {
   error: boolean;
   /** OTLP span kind; SERVER (2) unless given. Worker activities use INTERNAL (1). */
   kind?: number;
+  /** Causal relations which are not a parent/child call (for example a new run). */
+  links?: readonly SpanLink[];
+}
+
+export interface SpanLink {
+  traceId: string;
+  spanId: string;
 }
 
 export interface SpanExporterStats {
@@ -85,6 +93,10 @@ export function otlpTraceRequest(spans: readonly ServerSpan[], serviceName: stri
           startTimeUnixNano: span.startTimeUnixNano.toString(),
           endTimeUnixNano: span.endTimeUnixNano.toString(),
           attributes: Object.entries(span.attributes).map(([key, value]) => ({ key, value: attributeValue(value) })),
+          ...(span.links?.length ? { links: span.links.slice(0, 4).filter(link =>
+            traceIdPattern.test(link.traceId) && !/^0+$/.test(link.traceId) &&
+            spanIdPattern.test(link.spanId) && !/^0+$/.test(link.spanId)
+          ).map(link => ({ traceId: link.traceId, spanId: link.spanId })) } : {}),
           // STATUS_CODE_ERROR or STATUS_CODE_UNSET
           status: { code: span.error ? 2 : 0 }
         }))
@@ -121,6 +133,9 @@ export function createOtlpSpanExporter(options: OtlpSpanExporterOptions): SpanEx
     }
   };
   const flush = (): Promise<void> => {
+    // With no await in the empty branch, the async function's finally would
+    // run before assignment and leave a resolved promise installed forever.
+    if (!inFlight && !queue.length) return Promise.resolve();
     if (!inFlight) {
       inFlight = (async () => {
         try {

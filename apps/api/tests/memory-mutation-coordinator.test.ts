@@ -5,8 +5,17 @@ import {
   buildMemoryMutationWorkflowId,
   scheduleMemoryMutation
 } from "../src/memory-mutation-coordinator.js";
+import { createRequestTraceContext, requestTraceContexts } from "../src/trace-context.js";
 
 describe("Memory mutation coordinator", () => {
+  it("propagates the API request's recorded span through memo", async () => {
+    const context = createRequestTraceContext(undefined);
+    requestTraceContexts.remember("req:mutation-traced", context);
+    await scheduleMemoryMutation({ changeSetId: "memory_change:trace", traceId: "req:mutation-traced" }, async (_type, options) => {
+      expect(options.memo).toEqual({ spaceTraceId: "req:mutation-traced", traceparent: context.traceparent, w3cTraceId: context.w3cTraceId });
+      return { workflowId: options.workflowId };
+    });
+  });
   it("starts the dedicated workflow with deterministic duplicate guards", async () => {
     const calls: Array<{ workflowType: string; options: unknown }> = [];
     const input = { changeSetId: "memory_change:approved", traceId: "req:mutation-start" };
