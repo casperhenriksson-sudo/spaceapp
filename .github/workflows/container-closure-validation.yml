@@ -179,7 +179,14 @@ jobs:
           for file in scripts/container-runtime.mjs scripts/container-smoke.mjs scripts/tests/container-runtime.test.mjs scripts/tests/container-smoke.test.mjs; do
             cmp "$file" "$RUNNER_TEMP/spaceapp-public-export/$file"
           done
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep ffmpeg
+      - name: Ensure public proof prerequisites
+        run: |
+          if ! command -v rg >/dev/null || ! command -v ffmpeg >/dev/null; then
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y -qq ripgrep ffmpeg
+          fi
+          rg --version
+          ffmpeg -version
       - run: npm ci --no-audit --no-fund
         working-directory: ${{ runner.temp }}/spaceapp-public-export
       - run: npm audit --audit-level=high
