@@ -16,14 +16,36 @@ on:
         required: false
         default: false
         type: boolean
+      diagnostics_only:
+        description: Diagnose runner package installation only
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
 env:
   ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
   SOURCE_REVISION: ${{ inputs.revision }}
 jobs:
+  tooling-diagnostics:
+    if: ${{ inputs.diagnostics_only }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect runner and install required test tools with visible output
+        run: |
+          set -euxo pipefail
+          cat /etc/os-release
+          command -v rg || true
+          command -v ffmpeg || true
+          sudo -n true
+          dpkg-query -W ripgrep ffmpeg || true
+          sudo cat /etc/apt/sources.list.d/ubuntu.sources
+          timeout 90s sudo -n env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=30 -o Acquire::Retries=0 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y ripgrep ffmpeg
+          rg --version
+          ffmpeg -version
   source-quality:
-    if: ${{ !inputs.public_only }}
+    if: ${{ !inputs.public_only && !inputs.diagnostics_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -65,7 +87,7 @@ jobs:
       - run: npm run build
       - run: npm run hygiene:preflight
   public-quality:
-    if: ${{ !inputs.source_only }}
+    if: ${{ !inputs.source_only && !inputs.diagnostics_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
