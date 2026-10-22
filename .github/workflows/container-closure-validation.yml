@@ -14,6 +14,10 @@ on:
         description: Validate the complete sanitized public candidate
         type: boolean
         default: false
+      build_images:
+        description: Build, smoke-test and scan both native image architectures
+        type: boolean
+        default: true
 permissions:
   contents: read
 jobs:
@@ -64,6 +68,7 @@ jobs:
           node --input-type=module -e 'await import("@space/cli-host")'
   images:
     needs: runtime
+    if: inputs.build_images || inputs.full_stack
     strategy:
       fail-fast: false
       matrix:
