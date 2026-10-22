@@ -115,8 +115,10 @@ describe("Space Control screenshot capture", () => {
     // A capture is read-only: it never holds the room lock (a video runs for minutes).
     repository.withLock = async () => { throw new Error("room lock taken"); };
     let release!: () => void;
+    let markRecordingStarted!: () => void;
+    const recordingStarted = new Promise<void>((resolve) => { markRecordingStarted = resolve; });
     const { capture, requests } = await adapter((request) => request.video
-      ? new Promise((resolve) => { release = () => resolve({ room: request.room, files: [{ file: join(String(request.outDir), "video-story.mp4"), viewport: "story", bytes: 4, sha256: "a".repeat(64) }] }); })
+      ? new Promise((resolve) => { release = () => resolve({ room: request.room, files: [{ file: join(String(request.outDir), "video-story.mp4"), viewport: "story", bytes: 4, sha256: "a".repeat(64) }] }); markRecordingStarted(); })
       : shotOf(request.room, String(request.viewport)));
     const service = createSpaceControl({ store, repository, controller: {} as never, send: vi.fn(async () => ({ submitted: true })),
       publish: vi.fn(async () => {}), captureScreenshot: capture } as never);
@@ -128,6 +130,8 @@ describe("Space Control screenshot capture", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       const started = service.screenshot(actor, room.id, { aspect: "9:16", video: { steps: [{ dwellMs: 1000 }] } } as never);
+      // mkdir uses real I/O; fake time can elapse before the recorder starts.
+      await recordingStarted;
       await vi.advanceTimersByTimeAsync(6000);
       const running = await started as { status: string; operationId: string };
       expect(running).toMatchObject({ status: "RUNNING", operationId: expect.any(String) });
