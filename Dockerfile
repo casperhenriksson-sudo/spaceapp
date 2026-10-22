@@ -113,7 +113,8 @@ RUN apt-get update \
          @opencode/cli@2.0.32 "${opencode_native}@2.0.32" \
     && ln -f "/usr/local/lib/node_modules/${opencode_native}/bin/opencode" \
          /usr/local/lib/node_modules/@opencode/cli/bin/opencode.exe \
-    && test "$(opencode --version)" = "2.0.32" \
+    && rm -rf /usr/local/lib/node_modules/@opencode/cli/node_modules \
+    && test "$(opencode --version)" = "opencode v2.0.32" \
     && install -d -o spaceapp -g spaceapp -m 0700 /var/lib/spaceapp-cli/vendor \
     && npm cache clean --force \
     && install -d -o spaceapp -g spaceapp -m 0700 \
