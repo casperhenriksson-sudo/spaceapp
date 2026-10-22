@@ -36,3 +36,7 @@ export async function traceFailure(): Promise<never> {
 export async function traceCancelled(): Promise<void> {
   await sleep("1 hour");
 }
+export async function traceLaterMissions(_original: TraceInput, later: TraceInput, background: TraceInput): Promise<void> {
+  await executeChild(traceChild, { args: [later], workflowId: `${workflowInfo().workflowId}:later` });
+  await executeChild(traceChild, { args: [background], workflowId: `${workflowInfo().workflowId}:background` });
+}

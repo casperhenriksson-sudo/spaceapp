@@ -56,6 +56,8 @@ describe("bounded workflow trace context", () => {
     expect(workflowCorrelation([value])).toEqual({ traceparent, background: false, ids: { "space.room_id": "room:test" } });
     expect(workflowCorrelation([{ prompt: { traceparent }, roomId: secret }])).toEqual({ traceparent: null, background: false, ids: {} });
     expect(workflowCorrelation([{ turn: { traceId: "trace:bg-one", roomAgentContinuation: { sourceRunId: "run:old" } } }]).background).toBe(true);
+    expect(workflowCorrelation([{ traceparent }, { traceId: "trace:bg-later", roomAgentContinuation: { sourceRunId: "run:later" } }]))
+      .toMatchObject({ traceparent, background: false });
   });
   it("enforces the attribute allowlist at the exporter boundary", () => {
     expect(workerSpanAttributes({ "space.attempt": 2, "space.duration_ms": 3, "space.room_id": "room:one",

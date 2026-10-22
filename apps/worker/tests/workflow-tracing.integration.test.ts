@@ -236,4 +236,35 @@ describe("real Temporal workflow to OTLP HTTP collector", () => {
       }
     } finally { await spanExporter.close(); }
   }, 120_000);
+
+  it("preserves a later mission's API parent and links a background child to its source and supervisor", async () => {
+    requests.length = 0;
+    const spanExporter = exporter();
+    const taskQueue = `missions-${randomUUID()}`;
+    const workflowId = `workflow:${randomUUID()}`;
+    const originalTrace = "1".repeat(32);
+    const laterTrace = "2".repeat(32);
+    const originalSpan = "3".repeat(16);
+    const laterSpan = "4".repeat(16);
+    const original = { traceparent: `00-${originalTrace}-${originalSpan}-01` };
+    const later = { traceparent: `00-${laterTrace}-${laterSpan}-01` };
+    const background = { ...later, traceId: "trace:bg-later", roomAgentContinuation: { sourceRunId: "run:later" } };
+    const active = await worker(taskQueue, spanExporter);
+    try {
+      await active.runUntil(() => environment.client.workflow.execute("traceLaterMissions", { taskQueue, workflowId, args: [original, later, background] }));
+      await spanExporter.flush();
+      const root = spans().find(span => span.name === "workflow traceLaterMissions")!;
+      const children = spans().filter(span => span.name === "workflow traceChild");
+      const mission = children.find(span => attributes(span)["space.workflow_id"] === `${workflowId}:later`)!;
+      const continuation = children.find(span => attributes(span)["space.workflow_id"] === `${workflowId}:background`)!;
+      expect(root.traceId).toBe(originalTrace);
+      expect(mission.traceId).toBe(laterTrace);
+      expect(mission.parentSpanId).toBe(laterSpan);
+      expect(mission.links).toContainEqual({ traceId: originalTrace, spanId: root.spanId });
+      expect(continuation.traceId).not.toBe(laterTrace);
+      expect(continuation.links).toEqual(expect.arrayContaining([
+        { traceId: laterTrace, spanId: laterSpan }, { traceId: originalTrace, spanId: root.spanId }
+      ]));
+    } finally { await spanExporter.close(); }
+  }, 120_000);
 });

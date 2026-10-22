@@ -62,17 +62,24 @@ const idFields = { roomId: "space.room_id", paneId: "space.pane_id", missionId: 
 export function workflowCorrelation(args: readonly unknown[]): WorkflowCorrelation {
   const found: WorkflowCorrelation = { traceparent: null, background: false, ids: {} };
   let remaining = 48;
+  let contextFound = false;
   const visit = (value: unknown, depth: number) => {
     if (--remaining < 0 || depth < 0 || !value || typeof value !== "object" || Array.isArray(value)) return;
     const record = value as Record<string, unknown>;
     const parent = parseTraceparent(record.traceparent);
-    if (!found.traceparent && parent) found.traceparent = formatTraceparent(parent.traceId, parent.parentId, parent.flags);
+    const background = typeof record.traceId === "string" && record.traceId.startsWith("trace:bg-") &&
+      Boolean(record.roomAgentContinuation && typeof record.roomAgentContinuation === "object");
+    // The first context owns both fields. A later argument containing another
+    // mission must not relabel the current execution as a background run.
+    if (!contextFound && (parent || background)) {
+      contextFound = true;
+      found.traceparent = parent ? formatTraceparent(parent.traceId, parent.parentId, parent.flags) : null;
+      found.background = background;
+    }
     for (const [key, attribute] of Object.entries(idFields)) {
       const safe = traceIdentifier(record[key]);
       if (safe && found.ids[attribute] === undefined) found.ids[attribute] = safe;
     }
-    if (typeof record.traceId === "string" && record.traceId.startsWith("trace:bg-") &&
-        record.roomAgentContinuation && typeof record.roomAgentContinuation === "object") found.background = true;
     for (const key of ["turn", "item", "bridge", "input", "turnInput"]) visit(record[key], depth - 1);
     // A supervisor may start with its first mission already queued.
     if (Array.isArray(record.pending)) for (const item of record.pending.slice(0, 1)) visit(item, depth - 1);
