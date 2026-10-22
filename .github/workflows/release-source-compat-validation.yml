@@ -37,7 +37,7 @@ jobs:
           const exported=join(process.env.RUNNER_TEMP,'spaceapp-public-export');
           const files=execFileSync('git',['ls-files','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);
           const runtimeInput=p=>/^(Dockerfile|\.dockerignore|package(?:-lock)?\.json|tsconfig\.base\.json)$/.test(p)||
-            /^(deploy\/docker|starter-memory|agent-skills|apps\/web\/public)\//.test(p)||
+            /^(deploy\/docker|starter-memory|agent-skills|apps\/web\/public|THIRD_PARTY_LICENSES|demos)\//.test(p)||
             /^(LICENSE|NOTICE|THIRD_PARTY_NOTICES\.md)$/.test(p)||
             /^(?:apps|packages)\/[^/]+\/(?:package\.json|tsconfig[^/]*\.json|(?:src|scripts|grammars|migrations|bin|templates)\/)/.test(p)||
             p==='apps/web/server.mjs'||/^scripts\/(container-runtime|build-demo-projects|fix-build-permissions|reset-owner-password|rotate-owner-setup-token|portable-backup|portable-restore)\.mjs$/.test(p);
