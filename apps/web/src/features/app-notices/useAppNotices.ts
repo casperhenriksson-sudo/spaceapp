@@ -44,11 +44,12 @@ export interface AppNotices {
 export function useAppNotices(): AppNotices {
   const [liveDebugToast, setLiveDebugToast] = useState<LiveDebugToast | null>(null);
   const liveDebugTimerRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
 
   const showLiveDebug = useCallback((message: string, type: LiveDebugTone = "info") => {
     console.log(`[AI-Live-Debug][${type.toUpperCase()}] ${message}`);
     // Progress notes ("button tapped", "pane opened") stay in the console; only failures reach the screen.
-    if (type !== "error") return;
+    if (type !== "error" || !mountedRef.current) return;
     if (liveDebugTimerRef.current !== null) window.clearTimeout(liveDebugTimerRef.current);
     setLiveDebugToast({ id: Date.now(), message, type });
     liveDebugTimerRef.current = window.setTimeout(() => {
@@ -58,12 +59,18 @@ export function useAppNotices(): AppNotices {
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     const handleDebug = (event: Event) => {
       const detail = (event as CustomEvent<{ message: string; type?: LiveDebugTone }>).detail;
       if (detail?.message) showLiveDebug(detail.message, detail.type || "info");
     };
     window.addEventListener("space-live-debug", handleDebug);
-    return () => window.removeEventListener("space-live-debug", handleDebug);
+    return () => {
+      mountedRef.current = false;
+      if (liveDebugTimerRef.current !== null) window.clearTimeout(liveDebugTimerRef.current);
+      liveDebugTimerRef.current = null;
+      window.removeEventListener("space-live-debug", handleDebug);
+    };
   }, [showLiveDebug]);
 
   const [storageWarning, setStorageWarning] = useState<string>("");
