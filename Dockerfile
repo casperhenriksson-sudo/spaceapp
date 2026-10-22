@@ -97,11 +97,23 @@ COPY --chown=root:root starter-memory/installation-guide.md /etc/spaceapp-instal
 RUN chmod 0644 /etc/AGENTS.md
 ARG TARGETARCH
 # python3-minimal (about 13 MB): agents often check their work with a short python3 script (pilot F18).
-# OpenCode 2 (@opencode/cli): its postinstall picks the native binary for the image's platform.
+# Install only this Debian target's OpenCode binary, rather than all compatible
+# glibc/musl/AVX2 optional packages. The x64 baseline also runs without AVX2.
+# Match the official postinstall's hard link so the launcher and native package
+# share one executable; retain both package manifests and any shipped notices.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3-minimal \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install --global --no-audit --no-fund @opencode/cli@2.0.32 \
+    && case "$TARGETARCH" in \
+         amd64) opencode_native=@opencode/cli-linux-x64-baseline ;; \
+         arm64) opencode_native=@opencode/cli-linux-arm64 ;; \
+         *) echo "Unsupported OpenCode image architecture: $TARGETARCH" >&2; exit 1 ;; \
+       esac \
+    && npm install --global --ignore-scripts --omit=optional --no-audit --no-fund \
+         @opencode/cli@2.0.32 "${opencode_native}@2.0.32" \
+    && ln -f "/usr/local/lib/node_modules/${opencode_native}/bin/opencode" \
+         /usr/local/lib/node_modules/@opencode/cli/bin/opencode.exe \
+    && test "$(opencode --version)" = "2.0.32" \
     && install -d -o spaceapp -g spaceapp -m 0700 /var/lib/spaceapp-cli/vendor \
     && npm cache clean --force \
     && install -d -o spaceapp -g spaceapp -m 0700 \
