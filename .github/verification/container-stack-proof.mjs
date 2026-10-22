@@ -159,7 +159,7 @@ async function run() {
     const cliContainer = await docker(["ps", "-q", "--filter", `label=${label}`, "--filter", "label=com.docker.compose.service=spaceapp-cli"]);
     assert.match(cliContainer, /^[a-f0-9]+$/);
     report.openCodeVersion = await docker(["exec", "--user", "10001:10001", cliContainer, "/usr/local/bin/opencode", "--version"]);
-    assert.match(report.openCodeVersion, /\b2\.0\.32\b/);
+    assert.equal(report.openCodeVersion, "opencode v2.0.32");
     const browserPane = await request("/api/panes", "POST", { roomId: owner.starterRoomId, title: "Container browser proof", mode: "BROWSER" });
     assert(browserPane.id);
     const browserPath = `/api/panes/${encodeURIComponent(browserPane.id)}/browser/session`;
