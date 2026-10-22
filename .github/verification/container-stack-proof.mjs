@@ -3,8 +3,9 @@
 // environment meeting the unchanged launcher's real large-profile requirements.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -44,6 +45,7 @@ async function run() {
   const secrets = new Set();
   let mayHaveCreatedResources = false;
   let failure;
+  let terminalSocket;
   let installationOutput = "";
   const report = { environment: process.env.SPACEAPP_PROOF_ENVIRONMENT ?? "disposable Linux", sourceRevision: process.env.SOURCE_REVISION ?? null, profile: "large", resources: null, launcherVersion: RUNTIME_VERSION, install: false, workflowsReady: false, ownerSetup: false, openCodeRunning: false, openCodeVersion: null, terminalStdoutBytes: 0, browserReady: false, browserTitle: null, browserPngBytes: 0, cleaned: false };
   const redact = text => { for (const value of secrets) if (value) text = text.replaceAll(value, "[redacted synthetic secret]"); return text; };
@@ -111,7 +113,39 @@ async function run() {
     const pane = panes.data.find(pane => pane.terminalRuntimeId === "cli:opencode");
     assert(pane, "Getting Started OpenCode pane is missing");
     const cliPath = `/api/panes/${encodeURIComponent(pane.id)}/cli/session`;
-    await request(cliPath, "POST", { runtimeId: "cli:opencode", includeTranscript: true });
+    const allocated = await request(cliPath, "POST", { runtimeId: "cli:opencode", includeTranscript: true });
+    assert(allocated.websocket?.token && allocated.session?.sessionId);
+    secrets.add(allocated.websocket.token);
+    // Allocation is intentionally IDLE. Follow the actual UI's protocol-v2
+    // terminal attach to start the real PTY, rather than polling an idle session.
+    const WebSocket = createRequire(import.meta.url)(join(source, "node_modules/ws"));
+    const terminalUrl = new URL(`/api/panes/${encodeURIComponent(pane.id)}/cli/terminal`, base.replace(/^http/, "ws"));
+    const terminalQuery = { sessionId: allocated.session.sessionId, token: allocated.websocket.token,
+      protocolVersion: "2", browserClientId: randomUUID(), tabLineageId: randomUUID(), pageClientId: randomUUID(),
+      clientMode: "INTERACTIVE", initialCols: "120", initialRows: "36" };
+    for (const [key, value] of Object.entries(terminalQuery)) terminalUrl.searchParams.set(key, value);
+    report.cliAttach = { protocolVersion: 2, ready: false, stdoutBytes: 0, status: null, error: null };
+    terminalSocket = new WebSocket(terminalUrl, { headers: { cookie, origin: base } });
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => finish(new Error("Timed out waiting for real terminal attach and OpenCode output")), 180_000);
+      function finish(error) { clearTimeout(timeout); error ? reject(error) : resolve(); }
+      terminalSocket.on("message", raw => {
+        try {
+          const message = JSON.parse(String(raw));
+          if (message.type === "error") throw new Error(`Terminal ${message.code}: ${message.message}`);
+          if (message.type === "ready") {
+            assert.equal(message.sessionId, allocated.session.sessionId);
+            assert.equal(message.runtimeId, "cli:opencode");
+            report.cliAttach.ready = true;
+          }
+          if (message.type === "status") report.cliAttach.status = message.status;
+          if (message.type === "output" && message.stream === "stdout") report.cliAttach.stdoutBytes += Buffer.byteLength(message.data);
+          if (report.cliAttach.ready && report.cliAttach.stdoutBytes > 100) finish();
+        } catch (error) { report.cliAttach.error = redact(error.message); finish(error); }
+      });
+      terminalSocket.on("error", error => { report.cliAttach.error = redact(error.message); finish(error); });
+      terminalSocket.on("close", code => { finish(new Error(`Terminal closed before proof completion (${code})`)); });
+    });
     await wait(3_000);
     const cli = await until(async () => {
       const value = await request(`${cliPath}?includeTranscript=true`);
@@ -140,11 +174,19 @@ async function run() {
     report.browserReady = true;
     report.browserTitle = browser.session.title;
     report.browserPngBytes = png.length;
+    assert.equal((await request(`${cliPath}?includeTranscript=false`)).session.status, "RUNNING",
+      "OpenCode must still be running after the browser page opens");
   } catch (error) {
     failure = error;
+    report.failure = redact(error.message).slice(0, 1500);
     installationOutput ||= `${error.stdout ?? ""}\n${error.stderr ?? ""}`;
     await captureSecrets();
   } finally {
+    if (terminalSocket) {
+      terminalSocket.close();
+      await Promise.race([new Promise(resolve => terminalSocket.once("close", resolve)), wait(2_000)]);
+      if (terminalSocket.readyState !== 3) terminalSocket.terminate();
+    }
     if (mayHaveCreatedResources) {
       try {
         const spec = launcher.composeCommand("down", home, { profile: "large" });
@@ -171,7 +213,7 @@ async function run() {
   }
   if (reportFile) await writeFile(reportFile, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
   process.stdout.write(`${JSON.stringify(report)}\n`);
-  if (failure) throw failure;
+  if (failure) throw new Error(redact(failure.message));
   assert(report.install && report.workflowsReady && report.ownerSetup && report.openCodeRunning && report.browserReady && report.cleaned);
 }
 
