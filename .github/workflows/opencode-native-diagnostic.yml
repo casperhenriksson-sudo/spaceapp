@@ -1,0 +1,44 @@
+name: Native OpenCode package diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
+    steps:
+      - name: Check pinned native package and exact version in the actual Debian base
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          docker run --rm -i -e TARGETARCH="$ARCH" node:22.23.0-trixie-slim@sha256:cfd8f2a5bc50526aee08e88970979f92722828e7dcc6d8983607fb8bff4bdb82 sh -s <<'SH'
+          set -eux
+          npm install --global --ignore-scripts --no-audit --no-fund npm@11.18.0
+          case "$TARGETARCH" in
+            amd64) native=@opencode/cli-linux-x64-baseline ;;
+            arm64) native=@opencode/cli-linux-arm64 ;;
+            *) exit 1 ;;
+          esac
+          npm install --global --ignore-scripts --omit=optional --no-audit --no-fund @opencode/cli@2.0.32 "${native}@2.0.32"
+          ls -l "/usr/local/lib/node_modules/${native}/bin/opencode" /usr/local/bin/opencode
+          chmod 0755 "/usr/local/lib/node_modules/${native}/bin/opencode"
+          ln -f "/usr/local/lib/node_modules/${native}/bin/opencode" /usr/local/lib/node_modules/@opencode/cli/bin/opencode.exe
+          du -sm /usr/local/lib/node_modules/@opencode/*
+          set +e
+          actual=$(opencode --version 2>&1)
+          status=$?
+          set -e
+          printf 'Version exit status: %s\nVersion output: <%s>\n' "$status" "$actual"
+          printf '%s' "$actual" | od -An -tx1
+          test "$status" = 0
+          test "$actual" = 2.0.32
+          SH
