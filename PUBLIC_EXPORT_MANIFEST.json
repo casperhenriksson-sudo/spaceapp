@@ -1,7 +1,7 @@
 {
   "format": "spaceapp-public-export",
   "schemaVersion": 2,
-  "sourceCommit": "7619ef952387dba2480afecdb1ae332a0dc489ff",
+  "sourceCommit": "c067c535c2626f5041b9705eebbe22f5c31ac75f",
   "fileCount": 4729,
   "transformations": 393,
   "files": [
@@ -8515,8 +8515,8 @@
     },
     {
       "path": "apps/api/package.json",
-      "sourceObjectId": "de5b0db130af3a343bbf3e1835eecbb72bb4300c",
-      "sha256": "6788564e613c1b43df05aa1a8d2b466830239fa8bd74e93296c5c43fc4e11e00",
+      "sourceObjectId": "79fd782d2e29313517de4af909cddc5791cfd7f7",
+      "sha256": "dbeab1706913eed692334d56042ed675c73acaef86d8261c8f73aa55bd6c7eab",
       "size": 1970
     },
     {
@@ -14347,8 +14347,8 @@
     },
     {
       "path": "apps/web/package.json",
-      "sourceObjectId": "0b1bf277f8a437ae75555f24553857b47918802b",
-      "sha256": "f90bd11738d8eaefd49a5562ed751673db9c608622e74825f6d75fc6dfe8ae84",
+      "sourceObjectId": "33b7ed6cc7dd5ad6e182f76eae76e6e2e5440b89",
+      "sha256": "f9ca85ca3055d720cd12be2f1291c0cca3b8b4560398c4f065d89fa051126a1d",
       "size": 1378
     },
     {
@@ -21679,8 +21679,8 @@
     },
     {
       "path": "apps/worker/package.json",
-      "sourceObjectId": "51ea5d9480b1fee424dad0196bc1a94eb48e8501",
-      "sha256": "c4d20818f64fb66c1886ecbecb62482b87c717f12841818a5e2558de3d928ea1",
+      "sourceObjectId": "d7a484ac8fb49132203bfc4d1ab01b1d6d975739",
+      "sha256": "b357357c037bd4c33c50d75618437ff36dc461365eac63d74355de1740de348c",
       "size": 869
     },
     {
@@ -22513,20 +22513,20 @@
     },
     {
       "path": "package-lock.json",
-      "sourceObjectId": "6d51195bdd74dda1dfd6810e2de5ac05c10e4a61",
-      "sha256": "c0d26ac503d6255e91f6c5fdea4077fecaa3d5034e471fc2b9a068cee496a8dd",
-      "size": 419519
+      "sourceObjectId": "2467956ee1eefad6726373cd81dad1bd7d7c5346",
+      "sha256": "64f749608620190b0d9603d2515c36f332f38a9f30dab52005deb46fe9907b99",
+      "size": 419142
     },
     {
       "path": "package.json",
-      "sourceObjectId": "62128b7e59e9f56b96f4d6685e4a50155f02f4c5",
-      "sha256": "211f8b2305dd627f738e6b1f1246cea555165cdb1d657669c220c271f6ed5ef4",
-      "size": 4220
+      "sourceObjectId": "5ba97578edaf7aba42abb6759578f3d09e0e3d12",
+      "sha256": "19efbe2169c5edce64b4f1a4cb64c9d49829bbe8ce01d5af2ab4380330fcc29b",
+      "size": 4221
     },
     {
       "path": "packages/browser-host/package.json",
-      "sourceObjectId": "ff381af4d22d8ec67b7602bae6819c17b7e9492f",
-      "sha256": "cbe2d53039eaac69399eb0a20684199d16fa07054892d32e81bb6f257ae7869f",
+      "sourceObjectId": "f19546b17a3f77243ce5e419fca4b1c7e15d4e78",
+      "sha256": "72a199770dd29985a5fa9b72e360b592e746d40af96e1efdbc639f2b7d14810b",
       "size": 546
     },
     {
@@ -22579,8 +22579,8 @@
     },
     {
       "path": "packages/cli-host/package.json",
-      "sourceObjectId": "10c332ab262d85f69428c984bf035786c9bb8d1b",
-      "sha256": "e4e9997871456a5c438e0ee642d87a9248d822f37a9ac00dcc9b0413b218de20",
+      "sourceObjectId": "d665cae5ccc1f3125771b7e2c6523599d18d0375",
+      "sha256": "37b87e6b31a9b308c2097e69a3943af59f709ff86ecce87f5dfa7d624e7632e1",
       "size": 615
     },
     {
@@ -22657,8 +22657,8 @@
     },
     {
       "path": "packages/codex-app-server/package.json",
-      "sourceObjectId": "dcdcb61a546ffa253ea81b73aa9ad097bade7d7f",
-      "sha256": "cb96356d0a91b53a9934dd6481ebcde76d5d2d375fe988c92ed08f7172a8706b",
+      "sourceObjectId": "aee79de1b4342c972bf6758bc8f580ee6c44b354",
+      "sha256": "495fec31237a6bbbe3cb2c8345b6f0bfe8a90cd306c6648abbe98d1ae2e56816",
       "size": 599
     },
     {
@@ -22765,8 +22765,8 @@
     },
     {
       "path": "packages/contracts/package.json",
-      "sourceObjectId": "b2fb99faf690e7bce57a3d54ddf2c8e582db266a",
-      "sha256": "6dfa0140071eabab7abcdea7d283fe574ff47fd0432bd6ed00a7b53012f230b1",
+      "sourceObjectId": "44ac04459d2d4f30e532aa0ffcdd09fa3fce810b",
+      "sha256": "8917a6036f582b19ae9a72c242206824c28b416cd8a92cd8c8135ae2229ffd99",
       "size": 677
     },
     {
@@ -25015,8 +25015,8 @@
     },
     {
       "path": "packages/db/package.json",
-      "sourceObjectId": "74d95baa9619331a40f877be0e6ebd9995f3dc25",
-      "sha256": "c851a0e483b426cbe86ec5d6f9d63b26b22e49d999edca90b32324d21a0ca5af",
+      "sourceObjectId": "24382cd4259c179258f01b4d8652a05d16f33a88",
+      "sha256": "509df65933c53b0b7b9a30c18f475ac63e6080d6462b6262e4d4774976d5ede9",
       "size": 672
     },
     {
@@ -25567,8 +25567,8 @@
     },
     {
       "path": "packages/gateway/package.json",
-      "sourceObjectId": "650db1b9e0a4f4f121dc60abd3c1e2f26f22f3e2",
-      "sha256": "9e5bcb15cce1c08be7a63b165c3d78b705847f926fd6e07b2e04a269b316b972",
+      "sourceObjectId": "514b136ff58e21ab43ca338c20705d80e1d6cb7f",
+      "sha256": "1e076757e197f3af4564bd52d51cb2ab2b6fd8bb17e557f58e2fa014233c3e0e",
       "size": 877
     },
     {
@@ -27637,8 +27637,8 @@
     },
     {
       "path": "packages/memory-graph/package.json",
-      "sourceObjectId": "1075c2be23987a8de191cd38d647214ca508aeb9",
-      "sha256": "57055ffd6b8b9b8dd9f655ce408306b527be1b88504ae0e1f0a15b6ad5449e34",
+      "sourceObjectId": "cd242e1a2b6a914ccc6c5ab8741cf18af2826dbb",
+      "sha256": "dc106e0f7ec3ba4ac389f6e0ef4a2aefe30ef21616369950c22720c6d973160c",
       "size": 691
     },
     {
@@ -27769,8 +27769,8 @@
     },
     {
       "path": "packages/opencode-control/package.json",
-      "sourceObjectId": "0a81aa6d1e5b8c505dd4b85f74a59ce87140a503",
-      "sha256": "41c07382094c7754486cfb97848c41dd218d690f6b3b354217180260704828d6",
+      "sourceObjectId": "c98a1709aec1ad52ecbed74bd240b2a13e6f007d",
+      "sha256": "858e77a38ad44f185565a3c30671e274166f131c44ec015bdc2b720e00509c2d",
       "size": 515
     },
     {
@@ -27793,8 +27793,8 @@
     },
     {
       "path": "packages/runtime/package.json",
-      "sourceObjectId": "af7307ed3d6bcaeeabca2143c43f24faee7c3781",
-      "sha256": "ad79538eda943026e70253ec8def8e1bcd678057ede01b0651dcecf0acf4ebb0",
+      "sourceObjectId": "6a8262102149fb7aa6831a74d30a26c24f296b81",
+      "sha256": "cffa69203a0d20b0b108296db966509ce6a4926cbdfda336fac52d3910630d97",
       "size": 622
     },
     {
@@ -28141,8 +28141,8 @@
     },
     {
       "path": "packages/streaming/package.json",
-      "sourceObjectId": "04fcf47fb0adfe919e87f5c92cd9c8634ad894cb",
-      "sha256": "11fa7f048a649659ed47f55710ce81498e8b17d243c6663bd62651df672dab69",
+      "sourceObjectId": "8d17fe6631acbaafa528915c7486fcaac9266d46",
+      "sha256": "4aba0883e24c67817a7c26f85674c7e1596a429d7472b24ce45290e627fa5d37",
       "size": 639
     },
     {

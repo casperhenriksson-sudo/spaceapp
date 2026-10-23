@@ -7,8 +7,9 @@ Semantic Versioning.
 
 ## [1.1.7] - 2026-10-21
 
-Source: sanitized Space app @ 7619ef9523 (4729 files: SpaceApp 77d00f6895 with
-the reviewed fixes of the 1.1.7 internal review). Moves SpaceApp and the
+Source: sanitized Space app @ c067c535c2 (4729 files: SpaceApp 77d00f6895 with
+the reviewed fixes of the 1.1.7 internal review and the dependency security
+updates below). Moves SpaceApp and the
 launcher to the MIT License, makes OpenCode 2 the first CLI, and ships the
 remaining fixes from the independent reviews; open items are listed in
 `docs/quality/KNOWN_LIMITATIONS.md`.
@@ -44,6 +45,11 @@ remaining fixes from the independent reviews; open items are listed in
   releases update it (its update dialog took a new pane's first prompt).
 
 ### Security and integrity
+
+- Dependency security updates: hono 4.13.11 (GHSA-5r4p-p66f-jhc7) and
+  sanitize-html 2.18.1 (GHSA-x3q4-9hxx-gx8m, GHSA-374f-7chj-9948,
+  GHSA-cv27-6wvh-8x7j, CVE-2026-113650) in the images; vite 7.3.7 and vitest
+  4.1.12 in the build and test tools.
 
 - SpaceApp's own images are pulled by the digest the release records in the
   npm package, including the CLI containers of team accounts.
