@@ -4,14 +4,25 @@ import { pathToFileURL } from "node:url";
 
 const mebibyte = 1024 * 1024;
 
-// Native Ubuntu measurements for per-service closures at 7672641 (MiB):
+// Historical native Ubuntu measurements for per-service closures at 7672641 (MiB):
 //                 core    browser    cli
 // linux/amd64     771.2    1081.9    637.0
 // linux/arm64     791.7    1111.6    668.6
 // https://github.com/casperhenriksson-sudo/spaceapp/actions/runs/39783003288
 // Each service gets 18-24 MiB above its larger measured architecture, below
 // issue 64's 850 / 1350 / 1000 MiB maximums. Security updates must still pass
-// these ceilings; the PR records final-head measurements and scan results.
+// these ceilings. These measurements predate the upstream additions below;
+// current-head native image measurements and scans are still required.
+// Upstream's untrimmed-image context is retained here for the compatibility review:
+// 1.1.3 raised core and browser (998.7 / 1670.6 MiB measured): the current
+// application adds production dependencies pdfjs-dist with @napi-rs/canvas
+// (81 MiB, API PDF handling), typescript (23 MiB, peer of @t3-oss/env-core) and
+// js-tiktoken (22 MiB, Space Gateway token counting).
+// 1.1.5 raised core again: linux/arm64 measured 1066.9 MiB and linux/amd64 1045.0 MiB (sqlite3 in the image,
+// the 1.1.5 application); the first public release run failed the arm64 build at 1050 MiB.
+// 1.1.8 raised core to 1150 MiB for Python with sqlite3 (the Databases tool's SQLite worker): linux/amd64 measured
+// 1090.6 MiB with python3 (rc3 without Python: 1057.9 MiB); the trimmed python3-minimal + libpython3-stdlib variant
+// measured 1078.6 MiB, 21.4 MiB under the old 1100 MiB, and arm64 ran about 22 MiB above amd64 in 1.1.5.
 export const containerImageSizeBudgets = Object.freeze({
   core: 815 * mebibyte,
   browser: 1130 * mebibyte,
