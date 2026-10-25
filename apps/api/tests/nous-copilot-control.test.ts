@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Pane, PaneCliSession } from "@space/contracts";
-import { createCopilotControl, type CopilotInvoke } from "../src/nous/copilot-control.js";
+import { createCopilotControl, startPaneCli, type CopilotInvoke } from "../src/nous/copilot-control.js";
 
 const pane = (mode: string, extra: Partial<Pane> = {}): Pane =>
   ({ id: "pane:bob00001", roomId: "room:bruno001", paneName: "Bob", title: "Bob", mode, terminalRuntimeId: "cli:claude", isClosed: false, ...extra } as unknown as Pane);
@@ -32,6 +32,34 @@ describe("space_copilot_control", () => {
     expect(switched.invoke).toHaveBeenCalledWith("user:operator", "POST", "/api/panes/pane%3Abob00001/cli/session", { runtimeId: "cli:claude", includeTranscript: false });
   });
 
+  it("starts the CLI itself and replaces a record with no process behind it (App Studio 23, 2026-10-23)", async () => {
+    const withStart = (active: PaneCliSession | null, hostRunning: boolean) => {
+      const invoke = vi.fn<CopilotInvoke>(async () => ({}));
+      const start = vi.fn(async () => ({ sessionId: "cli_session:started" }));
+      const store = { getActivePaneCliSession: async () => active, listPaneCliSessions: async () => active ? [active] : [] } as never;
+      return { invoke, start, store, control: createCopilotControl({ invoke, store, start, hostRunning: async () => hostRunning }) };
+    };
+    // A record whose host process runs: nothing to do.
+    const live = withStart(session(), true);
+    expect(await live.control("user:operator", pane("APP_STUDIO"), "start_agent")).toBe("Bob's agent is already running.");
+    expect(live.start).not.toHaveBeenCalled();
+    // A record left by an allocation nobody started: started as it is, no second session.
+    const stale = withStart(session(), false);
+    expect(await stale.control("user:operator", pane("APP_STUDIO"), "start_agent")).toBe("Started Bob's agent (cli:claude).");
+    expect(stale.start).toHaveBeenCalledWith(expect.objectContaining({ id: "pane:bob00001" }));
+    expect(stale.invoke).not.toHaveBeenCalled();
+    // No record: the session route opens it (persona, account), then the CLI starts.
+    const none = withStart(null, false);
+    await none.control("user:operator", pane("DESIGN"), "start_agent");
+    expect(none.invoke).toHaveBeenCalledWith("user:operator", "POST", "/api/panes/pane%3Abob00001/cli/session", { runtimeId: "cli:claude", includeTranscript: false });
+    expect(none.start).toHaveBeenCalledTimes(1);
+    // Space Control's start goes through the same function.
+    expect(await startPaneCli({ invoke: live.invoke, store: live.store, start: live.start, hostRunning: async () => true }, "user:operator", pane("VIDEO")))
+      .toEqual({ status: "COMPLETED", detail: "Pane session is already active." });
+    expect(await startPaneCli({ invoke: stale.invoke, store: stale.store, start: stale.start, hostRunning: async () => false }, "user:operator", pane("VIDEO")))
+      .toEqual({ sessionId: "cli_session:started" });
+  });
+
   it("stops only a running agent", async () => {
     const running = fixture(session());
     expect(await running.control("user:operator", pane("JOB_APPLY"), "stop_agent")).toBe("Stopped Bob's agent.");
@@ -60,6 +88,15 @@ describe("space_copilot_control", () => {
     expect(f.invoke).toHaveBeenLastCalledWith("user:operator", "POST", "/api/panes/pane%3Abob00001/freelance-copilot/run/pause", {});
     expect(await f.control("user:operator", pane("JOB_APPLY"), "run_stop")).toBe("Stopped Bob's run.");
     expect(f.invoke).toHaveBeenLastCalledWith("user:operator", "POST", "/api/panes/pane%3Abob00001/job-apply/run/stop", {});
+  });
+
+  it("controls an App Studio pane through its own settings and run routes", async () => {
+    const f = fixture(session(), session(), { paused: false, devices: ["iphone-402x874"] });
+    expect(await f.control("user:operator", pane("APP_STUDIO"), "pause")).toBe("Paused Bob.");
+    expect(f.invoke).toHaveBeenLastCalledWith("user:operator", "PUT", "/api/panes/pane%3Abob00001/app-studio/settings",
+      { view: { tab: "inbox" }, settings: { paused: true, devices: ["iphone-402x874"] } });
+    expect(await f.control("user:operator", pane("APP_STUDIO"), "run_start")).toBe("Bob's run is RUNNING; its agent got the kickoff.");
+    expect(f.invoke).toHaveBeenLastCalledWith("user:operator", "POST", "/api/panes/pane%3Abob00001/app-studio/run/start", {});
   });
 
   it("refuses panes that are not copilots", async () => {

@@ -38,6 +38,7 @@ import {
   resolveInstallProfile,
   resolveSpaceAppHome,
   saveConfig,
+  readRecordedDigests,
   selectLatestBackupId,
   SPACEAPP_UPGRADE_POLICY,
   upgradePath,
@@ -64,6 +65,10 @@ import {
   installFunnelFacts,
   isInstallPingAllowed
 } from "./telemetry.mjs";
+import { PACKAGE_IMAGE_LOCK } from "./image-lock.mjs";
+import { IMAGE_VERIFY_OFF_WARNING, imageVerificationOff } from "./image-attestations.mjs";
+// scripts/portable-restore.mjs (in the core image) exits with this code when a restore changed nothing or put everything back.
+export const RESTORE_UNCHANGED_EXIT = 3;
 
 const APPLICATION_READY_WAIT_MINUTES = 10;
 const APPLICATION_READY_WAIT_MS = APPLICATION_READY_WAIT_MINUTES * 60 * 1_000;
@@ -330,6 +335,7 @@ export async function run(argv, {
 
   const [command = "help", ...args] = filteredArgv;
   const root = resolveSpaceAppHome({ env, platform });
+  if (imageVerificationOff(env)) stderr.write(IMAGE_VERIFY_OFF_WARNING);
 
   if (["help", "--help", "-h"].includes(command) || args.includes("--help") || args.includes("-h")) {
     stdout.write(helpText());
@@ -497,9 +503,14 @@ export async function run(argv, {
     if (!config.previousVersion) {
       throw new Error("No previous SpaceApp version is recorded.");
     }
+    // Pinned when this installation recorded the previous version's digests; otherwise said before the owner agrees.
+    const pinned = PACKAGE_IMAGE_LOCK?.runtimeVersion === config.previousVersion || Boolean((await readRecordedDigests(root))[config.previousVersion]);
     const approved = await requireChangeApproval(stdin, stdout, stderr, [
       `Runtime image version: ${config.version} -> ${config.previousVersion}`,
-      "Rollback restores the previously recorded runtime images and configuration."
+      "Rollback restores the previously recorded runtime images and configuration.",
+      pinned
+        ? `The ${config.previousVersion} images are pulled by the digests recorded when it was installed.`
+        : `No digests were recorded for ${config.previousVersion} (installed before digest pinning): its images are pulled by version tag.`
     ]);
     if (!approved) {
       return 0;
@@ -530,7 +541,8 @@ export async function run(argv, {
   }
   if (command === "backup") {
     assertNoArgs(args, command);
-    const backupCode = await runtimeExecute(composeCommand("backup", root, { profile: config.profile, companionsEnabled: config.companionsEnabled }), { stdin, stdout, stderr });
+    // A paused, consistent backup first (external review 2026-10-16 #3), then the workspace list and CLI settings (pilot F8).
+    const backupCode = await backupWithWritersPaused(runtimeExecute, root, config, { stdin, stdout, stderr });
     if (backupCode !== 0) return backupCode;
     await addBackupExtras({ root, config, stdin, stdout, stderr, execute: runtimeExecute })
       .catch((error) => stderr.write(`The backup was created; its workspace list and CLI settings were not added: ${error.message}\n`));
@@ -548,15 +560,28 @@ export async function run(argv, {
       throw new Error("Restore cancelled.");
     }
     const backupId = await selectLatestBackupId(root);
-    const backupCode = await runtimeExecute(composeCommand("backup", root, { profile: config.profile, companionsEnabled: config.companionsEnabled }), { stdin, stdout, stderr });
+    const backupCode = await backupWithWritersPaused(runtimeExecute, root, config, { stdin, stdout, stderr });
     if (backupCode !== 0) return backupCode;
-    const stopCode = await runtimeExecute(composeCommand("stopForRestore", root, { profile: config.profile, companionsEnabled: config.companionsEnabled }), { stdin, stdout, stderr });
+    const stopCode = await runtimeExecute(composeCommand("stopForPortableRestore", root, { profile: config.profile, companionsEnabled: config.companionsEnabled }), { stdin, stdout, stderr });
     if (stopCode !== 0) return stopCode;
+    // The backup just made holds the data from before the restore.
+    const safetyBackupId = await selectLatestBackupId(root).catch(() => "the newest backup");
     const restoreCode = await runtimeExecute(
       composeCommand("restore", root, { backupId, profile: config.profile }),
       { stdin, stdout, stderr }
     );
-    if (restoreCode !== 0) return restoreCode;
+    if (restoreCode !== 0) {
+      // Exit 3: the restore changed nothing or put every database and file back, so SpaceApp starts again as it was (1.1.8).
+      if (restoreCode === RESTORE_UNCHANGED_EXIT) {
+        const againCode = await runtimeExecute(composeCommand("up", root, { profile: config.profile, companionsEnabled: config.companionsEnabled }), { stdin, stdout, stderr });
+        stderr.write(againCode === 0
+          ? `The restore of ${backupId} did not happen; SpaceApp runs again with its data from before the restore (also kept in the backup ${safetyBackupId}).\n`
+          : `The restore of ${backupId} did not happen and SpaceApp could not be started again; run "${UNIVERSAL_COMMAND} up". Its data from before the restore is kept in the backup ${safetyBackupId}.\n`);
+        return restoreCode;
+      }
+      stderr.write(`The restore of ${backupId} failed and SpaceApp stays stopped: the messages above say what is left at the backup's state. To start SpaceApp anyway, run "${UNIVERSAL_COMMAND} up"; to try again, run "${UNIVERSAL_COMMAND} restore". The data from before the restore is kept in the backup ${safetyBackupId}.\n`);
+      return restoreCode;
+    }
     const upCode = await runtimeExecute(composeCommand("up", root, { profile: config.profile, companionsEnabled: config.companionsEnabled }), { stdin, stdout, stderr });
     if (upCode !== 0) return upCode;
     await restoreBackupExtras({ root, config, backupId, stdin, stdout, stderr, execute: runtimeExecute })
@@ -1449,6 +1474,25 @@ async function collectFiles(directory, logicalDirectory) {
   return files;
 }
 
+// Writers (core, CLI, browser, Temporal) are frozen, not stopped, while the backup runs in a one-off container:
+// the database, files, memory and Temporal histories are one moment and CLI sessions survive (external review
+// 2026-10-16). Compose skips services that are not running.
+async function backupWithWritersPaused(execute, root, config, io) {
+  const options = { profile: config.profile, companionsEnabled: config.companionsEnabled };
+  io.stdout.write("Pausing SpaceApp writers for the backup; the app and CLI sessions resume afterwards...\n");
+  const pauseCode = await execute(composeCommand("pauseWriters", root, options), io);
+  if (pauseCode !== 0) return pauseCode;
+  let backupCode = 1;
+  let resumeCode = 1;
+  try {
+    backupCode = await execute(composeCommand("backup", root, options), io);
+  } finally {
+    resumeCode = await execute(composeCommand("unpauseWriters", root, options), io).catch(() => 1);
+    if (resumeCode !== 0) io.stderr.write(`SpaceApp writers could not be resumed (exit ${resumeCode}). Run "${UNIVERSAL_COMMAND} up".\n`);
+  }
+  return backupCode !== 0 ? backupCode : resumeCode;
+}
+
 async function createQuiescedCheckpoint(root, config, io) {
   io.stdout.write("Pausing SpaceApp writers before the database checkpoint...\n");
   try {
@@ -2195,10 +2239,7 @@ async function factoryResetCommand({
   let backupCode;
   try {
     stdout.write("Creating safety backup before factory reset...\n");
-    backupCode = await execute(
-      composeCommand("backup", root, { profile: config.profile, companionsEnabled: config.companionsEnabled }),
-      { stdin, stdout, stderr }
-    );
+    backupCode = await backupWithWritersPaused(execute, root, config, { stdin, stdout, stderr });
   } catch (err) {
     stdout.write(`Safety backup error: ${err.message}.\n`);
     backupCode = 1;

@@ -15,7 +15,10 @@ export type NonCliPaneType =
   | "mail"
   | "marketing"
   | "freelance"
-  | "design";
+  | "design"
+  | "app-studio"
+  | "video"
+  | "security";
 
 export interface PaneItemConfig {
   id: NonCliPaneType;

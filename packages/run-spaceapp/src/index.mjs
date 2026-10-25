@@ -18,6 +18,8 @@ import {
   stripTrailingLineEndings
 } from "./string-utils.mjs";
 import { UNIVERSAL_COMMAND } from "./package-info.mjs";
+import { imageVerificationOff, verifyLockedImages } from "./image-attestations.mjs";
+import { IMAGE_TARGETS, imageDigestEnv, PACKAGE_IMAGE_LOCK, parseRecordedDigests } from "./image-lock.mjs";
 
 const CONFIG_SCHEMA_VERSION = 4;
 const CONTAINER_SECRET_MODE = 0o644;
@@ -94,6 +96,18 @@ export function profileRuntimeSettings(profile) {
   return settings;
 }
 const SECRET_FIELD = /password|secret|token|api.?key|credential/i;
+// provider install claude: an image with provider lockfiles reinstalls Claude Code from its lockfile (review INT5-C-F14).
+// Older runtime images approve Claude Code's postinstall (its native binary) for exactly the pinned version in the vendor
+// project's package.json allowScripts, then install with npm. $1 is the package; npm 11 refuses --allow-scripts for an
+// install with --prefix.
+const CLAUDE_INSTALL_SCRIPT = [
+  "[ ! -f /app/deploy/docker/provider-locks/claude.json ] || exec node /app/deploy/docker/provider-install.mjs claude --reinstall; ",
+  "node -e 'const fs=require(\"fs\");const dir=\"/var/lib/spaceapp-cli/vendor/claude\";const file=dir+\"/package.json\";",
+  "let manifest={private:true};try{manifest=JSON.parse(fs.readFileSync(file,\"utf8\"))}catch{}",
+  "manifest.allowScripts={...manifest.allowScripts,[process.argv[1]]:true};fs.mkdirSync(dir,{recursive:true});",
+  "fs.writeFileSync(file,JSON.stringify(manifest,null,2)+\"\\n\")' \"$1\"",
+  " && exec npm install --prefix /var/lib/spaceapp-cli/vendor/claude --no-audit --no-fund \"$1\""
+].join("");
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 export const BACKUP_ID_PATTERN = /^spaceapp-backup-\d{8}T\d{9}Z$/;
 const PROVIDERS = Object.freeze({
@@ -614,11 +628,12 @@ export async function writeSetupToken(root, token) {
   return target;
 }
 
-export function renderRuntimeEnv(config) {
+export function renderRuntimeEnv(config, imageLock = PACKAGE_IMAGE_LOCK, recordedDigests = {}) {
   validateConfig(config);
   const settings = PROFILE_RUNTIME_SETTINGS[config.profile];
   return [
     `SPACEAPP_IMAGE_TAG=${safeEnv(config.version)}`,
+    ...imageDigestEnv(config.version, imageLock, recordedDigests),
     `SPACEAPP_BIND_HOST=${safeEnv(config.bindHost)}`,
     `SPACEAPP_PORT=${config.port}`,
     `SPACEAPP_TELEMETRY=${config.telemetry}`,
@@ -686,7 +701,8 @@ export function renderWorkspaceCompose(config, { cliSandbox = false } = {}) {
     const slug = userSlug(user.id);
     return [
       `  spaceapp-cli-${slug}:`,
-      "    image: ghcr.io/oll4com/spaceapp-cli:${SPACEAPP_IMAGE_TAG}",
+      // The owner's pinned CLI image (runtime.env sets the digest; 1.1.7 review: a moved tag cannot change a user's).
+      "    image: ghcr.io/oll4com/spaceapp-cli:${SPACEAPP_IMAGE_TAG}${SPACEAPP_CLI_IMAGE_DIGEST:-}",
       "    restart: unless-stopped",
       "    init: true",
       "    security_opt:",
@@ -797,7 +813,8 @@ export function composeCommand(action, root, options = {}) {
     syncWorkspaces: ["up", "-d", "spaceapp-core", "spaceapp-cli"],
     // The CLIs' own settings (MCP servers, base URLs), never their logins: these files hold no credentials.
     exportCliSettings: ["exec", "-T", "--user", "10001:10001", options.service ?? "spaceapp-cli", "sh", "-c",
-      `cd /var/lib/spaceapp-cli/providers && tar -czf - $(ls -d ${CLI_SETTINGS_FILES.join(" ")} 2>/dev/null)`],
+      // No settings file yet (a fresh install): exit 3 without tar's "Cowardly refusing to create an empty archive" (1.1.8).
+      `cd /var/lib/spaceapp-cli/providers && files=$(ls -d ${CLI_SETTINGS_FILES.join(" ")} 2>/dev/null); [ -n "$files" ] || exit 3; tar -czf - $files`],
     importCliSettings: ["exec", "-T", "--user", "10001:10001", options.service ?? "spaceapp-cli", "tar", "-C", "/var/lib/spaceapp-cli/providers", "-xzf", "-"],
     // The CLI host answers on its socket (a user's container is ready only then, not when Docker starts it).
     cliHostReady: ["exec", "-T", "--user", "10001:10001", options.service ?? "spaceapp-cli", "node", "-e",
@@ -812,17 +829,23 @@ export function composeCommand(action, root, options = {}) {
       "--user",
       "10001:10001",
       "--entrypoint",
-      "npm",
+      "sh",
       options.service ?? "spaceapp-cli",
-      "install",
-      "--prefix",
-      "/var/lib/spaceapp-cli/vendor/claude",
-      "--no-audit",
-      "--no-fund",
+      "-c",
+      CLAUDE_INSTALL_SCRIPT,
+      "sh",
       "@anthropic-ai/claude-code@2.1.301"
     ],
-    backup: ["exec", "-T", "--user", "0:0", "spaceapp-core", "node", "scripts/portable-backup.mjs"],
+    // The backup runs in a one-off container while the writers are paused (backupWithWritersPaused in cli.mjs).
+    backup: [
+      "run", "--rm", "--no-deps", "--user", "0:0",
+      "--env", "SPACE_DATABASE_URL_FILE=/run/secrets/database-url",
+      "--entrypoint", "node", "spaceapp-core", "scripts/portable-backup.mjs"
+    ],
+    pauseWriters: ["pause", "spaceapp-core", "spaceapp-cli", "spaceapp-browser", "temporal"],
+    unpauseWriters: ["unpause", "spaceapp-core", "spaceapp-cli", "spaceapp-browser", "temporal"],
     stopForRestore: ["stop", "spaceapp-core", "spaceapp-cli", "spaceapp-browser"],
+    stopForPortableRestore: ["stop", "spaceapp-core", "spaceapp-cli", "spaceapp-browser", "temporal"],
     resetOwnerPassword: [
       "exec",
       "-T",
@@ -910,11 +933,46 @@ export async function selectLatestBackupId(root) {
   return backupId;
 }
 
-export async function writeRuntimeFiles(root, config) {
+// mkdir keeps the mode of a secrets folder that already existed; the 0644 container secrets inside rely on it being
+// owner-only (review INT5-C-F21), so install, init and every command that writes the runtime files tighten it.
+// Windows has no POSIX modes.
+async function ensureOwnerOnlySecrets(root) {
+  if (process.platform === "win32") return;
+  const secrets = join(root, "secrets");
+  const info = await stat(secrets).catch(() => null);
+  if (info && (info.mode & 0o077) !== 0) await chmod(secrets, 0o700);
+}
+
+/** The image digests this installation recorded per runtime version (image-digests.json). */
+export async function readRecordedDigests(root) {
+  return parseRecordedDigests(await readFile(join(root, "image-digests.json"), "utf8").catch(() => "{}"));
+}
+
+export async function writeRuntimeFiles(root, config, imageLock = PACKAGE_IMAGE_LOCK, verifyImages = verifyLockedImages) {
   validateHome(root);
   validateConfig(config);
   await mkdir(root, { recursive: true, mode: 0o700 });
-  await atomicWrite(join(root, "runtime.env"), renderRuntimeEnv(config));
+  await ensureOwnerOnlySecrets(root);
+  // Each runtime version a locked package installs keeps its digests, for a later rollback to it.
+  const recorded = await readRecordedDigests(root);
+  if (imageLock && imageLock.runtimeVersion === config.version) {
+    // Until a locked version's images have checked out here (image-attestations.mjs), every run verifies them first; the
+    // evidence names the run and public commit that built the bytes this installation runs. With the opt-out the
+    // version is recorded as unverified, and is verified on the first run without it.
+    const attestations = await readFile(join(root, "image-attestations.json"), "utf8").then(JSON.parse).catch(() => ({}));
+    const verified = IMAGE_TARGETS.every((target) => attestations?.[config.version]?.images?.[target]?.index === imageLock.images[target]);
+    if (!verified && !(imageVerificationOff() && attestations?.[config.version]?.skipped)) {
+      const evidence = imageVerificationOff()
+        ? { runtimeVersion: config.version, skipped: "SPACEAPP_IMAGE_VERIFY=off", at: new Date().toISOString() }
+        : await verifyImages(imageLock);
+      await atomicWrite(join(root, "image-attestations.json"), `${JSON.stringify({ ...attestations, [config.version]: evidence }, null, 2)}\n`, 0o644);
+    }
+    if (JSON.stringify(recorded[config.version]) !== JSON.stringify(imageLock.images)) {
+      recorded[config.version] = { ...imageLock.images };
+      await atomicWrite(join(root, "image-digests.json"), `${JSON.stringify(recorded, null, 2)}\n`, 0o644);
+    }
+  }
+  await atomicWrite(join(root, "runtime.env"), renderRuntimeEnv(config, imageLock, recorded));
   await atomicWrite(join(root, "compose.workspaces.yml"), renderWorkspaceCompose(config, { cliSandbox: await userNamespacesUsable() }));
   // The core reads it as uid 10001 through a read-only bind mount.
   await atomicWrite(join(root, "cli-hosts.json"), renderCliHosts(config), 0o644);
@@ -934,6 +992,7 @@ export async function prepareInstallation(root, {
     mkdir(join(root, "backups"), { recursive: true, mode: 0o700 }),
     mkdir(join(root, "secrets", "providers"), { recursive: true, mode: 0o700 })
   ]);
+  await ensureOwnerOnlySecrets(root);
   const resolvedProfile = profile === undefined
     ? undefined
     : resolveInstallProfile(profile, profile === "auto" ? await inspectSystemResources(root) : totalmem());

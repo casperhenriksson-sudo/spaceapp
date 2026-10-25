@@ -90,6 +90,10 @@ export function createMarketingCopilotService(options: MarketingCopilotServiceOp
     const label = MARKETING_CHANNEL_LABELS[post.channel];
     if (settings.paused) throw new SpaceConflictError("MARKETING_PAUSED: the pane is paused; nothing is published until the operator resumes it.");
     if (!settings.channels[post.channel].enabled) throw new SpaceConflictError(`MARKETING_CHANNEL_OFF: ${label} is off in this pane's Setup.`);
+    // Stable 2026-10-19: an approved X post slotted for 10-21 13:10 UTC went out two days early when the CLI began it itself.
+    if (post.scheduledAt && Date.parse(post.scheduledAt) > Date.parse(now())) {
+      throw new SpaceConflictError(`MARKETING_NOT_DUE: this post is scheduled for ${post.scheduledAt}; it publishes then, not before (it comes back as a PUBLISH item when due).`);
+    }
     const slot = await nextSlot(owner, pane, post);
     if (slot) throw new SpaceConflictError(`MARKETING_LIMIT: ${label} allows ${settings.channels[post.channel].posts} post(s) per ${settings.channels[post.channel].perDays} day(s); the next slot opens at ${slot}.`);
     if (post.status === "APPROVED") return { ruleId: null };
@@ -337,7 +341,8 @@ export function createMarketingCopilotService(options: MarketingCopilotServiceOp
       const run = await repository.getActiveRun(pane.id);
       const mine = run && run.ownerUserId === owner ? run : null;
       const briefs = await repository.listEvents(owner, { types: ["BRIEF"], status: ["PENDING"], limit: 200 });
-      return { run: mine, status: mine?.status ?? "IDLE", pending: await service.pendingItems(owner, pane.id), backlog: briefs.length + (await service.duePosts(owner, pane)).length };
+      const own = briefs.filter((brief) => !brief.paneId || brief.paneId === pane.id);
+      return { run: mine, status: mine?.status ?? "IDLE", pending: await service.pendingItems(owner, pane.id), backlog: own.length + (await service.duePosts(owner, pane)).length };
     },
     activeRun: (paneId: string) => repository.getActiveRun(paneId),
     async startRun(owner: string, paneId: string): Promise<{ run: MarketingRun; kickoff: boolean }> {
@@ -372,7 +377,7 @@ export function createMarketingCopilotService(options: MarketingCopilotServiceOp
     },
     /**
      * The agent's loop: waits (up to `waitMs`) while the run is RUNNING for a work item. A brief (oldest first) is
-     * taken for this pane; otherwise an approved post that is due comes back for publishing. With neither left the
+     * taken for this pane (a brief given to another pane is that pane's alone; one with no pane is anyone's); otherwise an approved post that is due comes back for publishing. With neither left the
      * run finishes (Start, a new brief's kickoff or the scheduler starts the next one).
      */
     async nextItem(owner: string, pane: Pane, input: { waitMs: number }) {

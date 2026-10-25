@@ -2,14 +2,19 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
   vaultAgentAccessRequestSchema, vaultAuditQuerySchema, vaultEnrollRequestSchema,
-  vaultItemIdSchema, vaultItemRecordSchema, vaultPasswordRotateRequestSchema, vaultRecoverySchema, vaultUnlockRequestSchema,
-  vaultBase64url, vaultCanonicalJson, vaultDelegateRequestSchema, vaultInboxKeyRequestSchema, vaultPendingIdSchema,
-  vaultDelegationCertificateSchema, vaultDigest, verifyVaultCertificate,
-  vaultSignupGrantCertificateSchema, vaultSignupGrantIdSchema, vaultSignupGrantRequestSchema, VAULT_SIGNUP_GRANT_LIMITS
+  vaultItemIdSchema, vaultItemRecordSchema, vaultPasswordRotateRequestSchema, vaultRecoverySetRequestSchema, vaultUnlockRequestSchema,
+  vaultBase64url, vaultCanonicalJson, vaultDelegateRequestSchema, vaultInboxKeySetRequestSchema, vaultPendingIdSchema,
+  vaultDelegationCertificateSchema, vaultDigest, verifyVaultCertificate, verifyVaultMessage, vaultOperatorRequestMessage,
+  vaultSignupGrantCertificateSchema, vaultSignupGrantIdSchema, vaultSignupGrantRequestSchema, VAULT_SIGNUP_GRANT_LIMITS, VAULT_BROKER_API_MAX_BYTES,
+  vaultItemBatchRequestSchema, vaultItemDeleteRequestSchema, vaultSiteCheckRequestSchema, type VaultAuditEvent, type VaultOperatorSignedKind,
+  newVaultHandle, vaultHandoffKeyCreateRequestSchema, vaultHandoffKeyIdSchema
 } from "@space/contracts";
-import { VaultConflictError, type PostgresVaultRepository } from "@space/db";
+import { VaultConflictError, type PostgresVaultRepository, type VaultState } from "@space/db";
+import { connectorSealContext, type ConnectorCrypto } from "../dot-connectors.js";
 import { GitControlError } from "../source-control/errors.js";
-import { VaultBrokerUnavailableError, type VaultBroker } from "./broker-client.js";
+import { VaultBrokerRefusedError, VaultBrokerUnavailableError, type VaultBroker } from "./broker-client.js";
+import { handOverPendingLogin } from "./handover.js";
+import { checkVaultSites, type VaultSiteResult } from "./site-check.js";
 
 // Vault routes (plan clipboard:vEYtT6-bEN0J step 4, ADR-012). Operator routes under /api/space-vault/* move ciphertext,
 // public keys and metadata only (the browser decrypts); session, CSRF and same-site checks are the API's global hook.
@@ -18,9 +23,10 @@ import { VaultBrokerUnavailableError, type VaultBroker } from "./broker-client.j
 
 export const cliVaultPathPrefix = "/api/cli/space-vault/";
 export type VaultStore = Pick<PostgresVaultRepository,
-  "getVault" | "enroll" | "rotateUnlock" | "setRecovery" | "bumpEpoch" | "saveItem" | "getItem" | "listItems" | "deleteItem"
-  | "enableAgentAccess" | "revokeAgentAccess" | "issueNonce" | "consumeNonce" | "appendAudit" | "listAudit" | "verifyAudit" | "createDelegation" | "getActiveDelegation"
-  | "setInbox" | "getInbox" | "addPending" | "listPending" | "deletePending" | "addSignupGrant" | "listSignupGrants" | "revokeSignupGrant">;
+  "getVault" | "enroll" | "rotateUnlock" | "setRecovery" | "bumpEpoch" | "saveItem" | "saveItems" | "deleteItems" | "getItem" | "listItems" | "listItemRecords" | "itemsByLoginKey" | "itemStats"
+  | "enableAgentAccess" | "revokeAgentAccess" | "issueNonce" | "consumeNonce" | "appendAudit" | "listAudit" | "verifyAudit" | "createDelegation" | "getActiveDelegation" | "extendDelegation"
+  | "setInbox" | "getInbox" | "addPending" | "listPending" | "deletePending" | "addSignupGrant" | "listSignupGrants" | "revokeSignupGrant"
+  | "addHandoffKey" | "listHandoffKeys" | "takeHandoffKey" | "useHandoffKey" | "deleteHandoffKey">;
 
 const notEnrolled = (): never => { throw new GitControlError("VAULT_NOT_ENROLLED", "Set up the Vault first.", 404); };
 const itemNotFound = (): never => { throw new GitControlError("VAULT_ITEM_NOT_FOUND", "This Vault item was not found.", 404); };
@@ -41,6 +47,10 @@ export interface VaultRouteDependencies {
   strictRouteOptions: Record<string, unknown>;
   parseBody<TSchema extends z.ZodTypeAny>(schema: TSchema, body: unknown): z.infer<TSchema>;
   parseQuery<TSchema extends z.ZodTypeAny>(schema: TSchema, query: unknown): z.infer<TSchema>;
+  /** Tests replace the network check. */
+  siteCheck?: (origins: string[]) => Promise<VaultSiteResult[]>;
+  /** Seals the API keys the operator hands to agents (server-readable by design, unlike logins). */
+  crypto: ConnectorCrypto;
 }
 
 export function registerVaultRoutes(app: FastifyInstance, deps: VaultRouteDependencies): void {
@@ -51,6 +61,24 @@ export function registerVaultRoutes(app: FastifyInstance, deps: VaultRouteDepend
     return deps.repository;
   };
   const vaultOf = async (owner: string) => (await repository().getVault(owner)) ?? notEnrolled();
+  // Key changes and deletes carry the unlocked dock's unlock-key signature over the request (Vault review 2026-10-22): a session
+  // cookie alone can no longer swap the inbox key, replace the password or recovery envelope, or delete logins. The signed body
+  // names the current epoch, so a signature from before a lock, revoke or password change is stale. Verified like the broker
+  // verifies a delegation: against the enrolled unlock public key.
+  const signedByOperator = async <T extends { operatorSignature: string; epoch?: number; expectedEpoch?: number }>(
+    owner: string, vault: VaultState, kind: VaultOperatorSignedKind, body: T, action: VaultAuditEvent["action"]
+  ): Promise<Omit<T, "operatorSignature">> => {
+    const { operatorSignature, ...rest } = body;
+    const stale = (rest.epoch ?? rest.expectedEpoch) !== vault.epoch;
+    const signed = !stale && await verifyVaultMessage(vaultBase64url.decode(vault.unlockPublicKey),
+      vaultOperatorRequestMessage(kind, { ownerUserId: owner, vaultId: vault.vaultId, ...rest }), operatorSignature);
+    if (!signed) {
+      await repository().appendAudit(owner, { actor: "OPERATOR", action, result: "BLOCKED", reason: stale ? "EPOCH_STALE" : "SIGNATURE_REFUSED" });
+      throw stale ? new GitControlError("VAULT_EPOCH_STALE", "The Vault was locked, revoked or changed elsewhere: lock it and unlock it again.", 409)
+        : new GitControlError("VAULT_SIGNATURE_REFUSED", "This change needs the unlocked Vault's signature.", 409);
+    }
+    return rest;
+  };
 
   app.get(route("/state"), routeOptions, async (request) => {
     const owner = await deps.owner(request);
@@ -59,9 +87,19 @@ export function registerVaultRoutes(app: FastifyInstance, deps: VaultRouteDepend
     const brokerAvailable = await broker.transportKey().then(() => true, () => false);
     return {
       ownerUserId: owner, enrolled: vault !== null, brokerAvailable, agentAccess: vault?.agentAccess ?? false, delegatedItems: delegation?.certificate.claims.items.length ?? 0,
+      // Logins agents saved or the Vault generated that wait for an unlocked dock to add and hand them over.
+      pendingItems: vault ? (await repository().listPending(owner)).length : 0,
       vault: vault && { vaultId: vault.vaultId, epoch: vault.epoch, delegationGeneration: vault.delegationGeneration, kdf: vault.kdf,
         unlockKeyVersion: vault.unlockKeyVersion, hasRecovery: vault.recovery !== null, auditSeq: vault.auditSeq, createdAt: vault.createdAt, updatedAt: vault.updatedAt }
     };
+  });
+
+  // The broker's own audit chain for ADMIN (space-admin-action vault-broker-audit, hardening plan step 16): ops, results, hashes.
+  app.get(route("/broker-audit"), routeOptions, async (request) => {
+    await deps.owner(request);
+    if (request.user?.role !== "ADMIN") throw new GitControlError("ADMIN_REQUIRED", "Only an administrator reads the broker's audit.", 403);
+    if (!broker.audit) throw new GitControlError("VAULT_BROKER_UNAVAILABLE", "The Vault broker is unavailable.", 503);
+    return broker.audit();
   });
 
   app.get(route("/broker"), routeOptions, async (request) => {
@@ -113,7 +151,13 @@ export function registerVaultRoutes(app: FastifyInstance, deps: VaultRouteDepend
     return { epoch: (await repository().bumpEpoch(owner, "OPERATOR_LOCK", "LOCK")) ?? notEnrolled() };
   });
 
-  app.get(route("/items"), routeOptions, async (request) => ({ items: await repository().listItems(await deps.owner(request)) }));
+  app.get(route("/items"), routeOptions, async (request) => {
+    const owner = await deps.owner(request);
+    return { items: await repository().listItems(owner), stats: await repository().itemStats(owner) };
+  });
+
+  // Every item with its envelopes (ciphertext only) in one answer: a Vault of thousands of logins hands over in one request.
+  app.get(route("/item-records"), routeOptions, async (request) => ({ items: await repository().listItemRecords(await deps.owner(request)) }));
 
   app.get(route("/items/:id"), routeOptions, async (request) => {
     const owner = await deps.owner(request);
@@ -129,30 +173,59 @@ export function registerVaultRoutes(app: FastifyInstance, deps: VaultRouteDepend
     return { item: (await repository().saveItem(owner, item)) ?? itemNotFound() };
   });
 
-  app.delete(route("/items/:id"), routeOptions, async (request) => {
+  // Many items in one transaction (a Chrome import): one request per batch instead of one per login.
+  app.put(route("/items"), routeOptions, async (request) => {
     const owner = await deps.owner(request);
-    if (!await repository().deleteItem(owner, parseQuery(itemParams, request.params).id)) itemNotFound();
-    return { deleted: true };
+    const { items } = parseBody(vaultItemBatchRequestSchema, request.body);
+    await vaultOf(owner);
+    const saved = await repository().saveItems(owner, items);
+    return { saved: saved?.filter(Boolean).length ?? 0, refused: saved?.filter((item) => !item).length ?? items.length };
+  });
+
+  // The only delete (one item or the dead-site list): signed by the unlocked dock.
+  app.post(route("/items/delete"), routeOptions, async (request) => {
+    const owner = await deps.owner(request);
+    const { ids } = await signedByOperator(owner, await vaultOf(owner), "item-delete", parseBody(vaultItemDeleteRequestSchema, request.body), "ITEM_DELETE");
+    return { deleted: await repository().deleteItems(owner, ids) };
+  });
+
+  // Which login sites still exist; only origins of the owner's own items are looked up, page content is never read.
+  app.post(route("/site-check"), routeOptions, async (request) => {
+    const owner = await deps.owner(request);
+    const { origins } = parseBody(vaultSiteCheckRequestSchema, request.body);
+    const own = new Set((await repository().listItems(owner)).flatMap((item) => item.origins));
+    return { results: await (deps.siteCheck ?? checkVaultSites)([...new Set(origins)].filter((origin) => own.has(origin))) };
   });
 
   app.post(route("/password"), strictRouteOptions, async (request) => {
     const owner = await deps.owner(request);
-    const { expectedEpoch, ...next } = parseBody(vaultPasswordRotateRequestSchema, request.body);
+    const body = parseBody(vaultPasswordRotateRequestSchema, request.body);
     const vault = await vaultOf(owner);
-    const rotated = await repository().rotateUnlock(owner, expectedEpoch, { ...next, serverShareEnvelope: vault.serverShareEnvelope }).catch(conflict);
+    const action = body.recovery ? "RECOVERY_USE" : "PASSWORD_ROTATE";
+    const { expectedEpoch, recovery: _recovery, ...next } = await signedByOperator(owner, vault, "password", body, action);
+    const rotated = await repository().rotateUnlock(owner, expectedEpoch, { ...next, serverShareEnvelope: vault.serverShareEnvelope }, action).catch(conflict);
     return { epoch: (rotated ?? notEnrolled()).epoch };
+  });
+
+  // The recovery envelope (ciphertext under the recovery key) for the dock's recovery: the browser opens it, unlocks with the
+  // broker like a password unlock and sets a new master password (hardening plan step 14).
+  app.get(route("/recovery"), strictRouteOptions, async (request) => {
+    const owner = await deps.owner(request);
+    return { recovery: (await vaultOf(owner)).recovery };
   });
 
   app.put(route("/recovery"), strictRouteOptions, async (request) => {
     const owner = await deps.owner(request);
-    if (!await repository().setRecovery(owner, parseBody(vaultRecoverySchema, request.body))) notEnrolled();
+    const { epoch: _epoch, ...recovery } = await signedByOperator(owner, await vaultOf(owner), "recovery", parseBody(vaultRecoverySetRequestSchema, request.body), "RECOVERY_SET");
+    if (!await repository().setRecovery(owner, recovery)) notEnrolled();
     return { recovery: true };
   });
 
   // Delegate items to agents and Nous (the dock does it whenever agent access is on: after each unlock and item change). The
   // broker signs the certificate; the API checks that signature against the broker's key and that it names exactly the
   // requested items that are not hidden from agents, their stored origins and fields, before anything is stored.
-  app.post(route("/delegations"), strictRouteOptions, async (request) => {
+  // Every login's fill envelopes in one body: a technical bound sized for VAULT_DELEGATION_TECHNICAL_MAX_ITEMS, not a policy limit.
+  app.post(route("/delegations"), { ...strictRouteOptions, bodyLimit: 4 * VAULT_BROKER_API_MAX_BYTES }, async (request) => {
     const owner = await deps.owner(request);
     const body = parseBody(vaultDelegateRequestSchema, request.body);
     const vault = await vaultOf(owner);
@@ -160,7 +233,7 @@ export function registerVaultRoutes(app: FastifyInstance, deps: VaultRouteDepend
       await repository().appendAudit(owner, { actor: "OPERATOR", action: "DELEGATE", result: "BLOCKED", reason });
       return new GitControlError("VAULT_DELEGATION_REFUSED", "The delegation was refused; nothing changed.", 409);
     };
-    const items = [];
+    const items: Parameters<VaultBroker["delegate"]>[0]["items"] = [];
     for (const requested of body.items) {
       const stored = await repository().getItem(owner, requested.handle);
       const metadata = stored?.metadata;
@@ -179,16 +252,22 @@ export function registerVaultRoutes(app: FastifyInstance, deps: VaultRouteDepend
       throw await refuse("DELEGATION_STALE");
     }
     const asked = { generation: body.generation, unlockEpoch: body.unlockEpoch, envelopeDigest: await vaultDigest(body.fillEnvelopes), expiresAt: body.expiresAt };
-    const signed = await broker.delegate({ ownerUserId: owner, vaultId: vault.vaultId, ...asked, items, sealedFillKey: body.sealedFillKey,
-      operatorSignature: body.operatorSignature, unlockPublicKey: vault.unlockPublicKey, serverShareEnvelope: vault.serverShareEnvelope })
+    const delegate = (sealedInboxKey?: typeof body.sealedInboxKey) => broker.delegate({ ownerUserId: owner, vaultId: vault.vaultId, ...asked, items, sealedFillKey: body.sealedFillKey,
+      operatorSignature: body.operatorSignature, unlockPublicKey: vault.unlockPublicKey, serverShareEnvelope: vault.serverShareEnvelope, ...(sealedInboxKey ? { sealedInboxKey } : {}) });
+    // A broker installed before 2026-10-20 refuses the inbox key as an unknown field: delegate without it, as before.
+    const signed = await delegate(body.sealedInboxKey)
+      .catch((error) => body.sealedInboxKey && error instanceof VaultBrokerRefusedError && error.reason === "BAD_REQUEST" ? delegate() : Promise.reject(error))
       .catch(async (error) => { if (error instanceof VaultBrokerUnavailableError) throw error; throw await refuse("BROKER_REFUSED"); });
     const brokerKey = await broker.delegationKey();
     let claims;
     try { claims = await verifyVaultCertificate(vaultBase64url.decode(brokerKey.publicKey), signed.certificate, vaultDelegationCertificateSchema); } catch { throw await refuse("CERTIFICATE_INVALID"); }
     if (vaultCanonicalJson(claims.items) !== vaultCanonicalJson(items) || claims.generation !== asked.generation || claims.envelopeDigest !== asked.envelopeDigest
       || claims.unlockEpoch !== asked.unlockEpoch || claims.expiresAt !== asked.expiresAt) throw await refuse("CERTIFICATE_MISMATCH");
-    const stored = await repository().createDelegation(owner, { certificate: signed.certificate, keyEnvelope: signed.keyEnvelope, fillEnvelopes: body.fillEnvelopes })
+    const stored = await repository().createDelegation(owner, { certificate: signed.certificate, keyEnvelope: signed.keyEnvelope, fillEnvelopes: body.fillEnvelopes,
+      ...(signed.inboxKeyEnvelope ? { inboxKeyEnvelope: signed.inboxKeyEnvelope } : {}) })
       .catch(async (error) => { if (error instanceof VaultConflictError) throw await refuse("CERTIFICATE_MISMATCH"); throw error; });
+    // Logins agents saved that the dock has not added yet stay fillable under the new generation.
+    for (const handle of new Set((await repository().listPending(owner)).map((entry) => entry.handle))) await handOverPendingLogin(repository(), broker, owner, handle);
     return stored ?? notEnrolled();
   });
 
@@ -254,9 +333,12 @@ export function registerVaultRoutes(app: FastifyInstance, deps: VaultRouteDepend
 
   // The inbox key (public half for fills and saves, private half sealed under the VRK) and the logins waiting in it.
   app.get(route("/inbox"), routeOptions, async (request) => ({ inbox: await repository().getInbox(await deps.owner(request)) }));
-  app.put(route("/inbox"), routeOptions, async (request) => {
+  // Every password agents generate or save is sealed to this key, so only the unlocked dock may set it (audited as INBOX_SET).
+  app.put(route("/inbox"), strictRouteOptions, async (request) => {
     const owner = await deps.owner(request);
-    if (!await repository().setInbox(owner, parseBody(vaultInboxKeyRequestSchema, request.body))) notEnrolled();
+    const { epoch: _epoch, ...inbox } = await signedByOperator(owner, await vaultOf(owner), "inbox", parseBody(vaultInboxKeySetRequestSchema, request.body), "INBOX_SET");
+    if (!await repository().setInbox(owner, inbox)) notEnrolled();
+    await repository().appendAudit(owner, { actor: "OPERATOR", action: "INBOX_SET", result: "OK" });
     return { inbox: true };
   });
   app.get(route("/pending"), routeOptions, async (request) => ({ pending: await repository().listPending(await deps.owner(request)) }));
@@ -264,6 +346,28 @@ export function registerVaultRoutes(app: FastifyInstance, deps: VaultRouteDepend
     const owner = await deps.owner(request);
     const { id } = parseQuery(z.object({ id: vaultPendingIdSchema }).strict(), request.params);
     if (!await repository().deletePending(owner, id)) throw new GitControlError("VAULT_PENDING_NOT_FOUND", "This waiting password was not found.", 404);
+    return { deleted: true };
+  });
+
+  // API keys for agents (operator request 2026-10-22, plan clipboard:-qvpC_Q0rAVg): the value goes in sealed with the API's key
+  // and comes out once, to the owner's pane whose space_vault_key_install writes it (agent.ts key-take, key-used); the dock
+  // lists ids and states, never a value.
+  app.post(route("/keys"), strictRouteOptions, async (request, reply) => {
+    const owner = await deps.owner(request);
+    const body = parseBody(vaultHandoffKeyCreateRequestSchema, request.body);
+    const id = newVaultHandle("vault_key");
+    const createdAt = new Date();
+    const expiresAt = new Date(createdAt.getTime() + body.expiresInHours * 3_600_000).toISOString();
+    const stored = await repository().addHandoffKey(owner, { id, label: body.label, valueSealed: deps.crypto.seal(body.value, connectorSealContext("vault-handoff-key", owner, id)), expiresAt });
+    if (!stored) throw new GitControlError("VAULT_KEY_NOT_STORED", "The key could not be stored.", 409);
+    await repository().appendAudit(owner, { actor: "OPERATOR", action: "KEY_HANDOFF", result: "OK", reason: "ADDED" });
+    return reply.code(201).send({ key: { id, label: body.label, createdAt: createdAt.toISOString(), expiresAt, takenAt: null, takenByPaneId: null, usedAt: null, usedByPaneId: null, hasValue: true } });
+  });
+  app.get(route("/keys"), routeOptions, async (request) => ({ keys: await repository().listHandoffKeys(await deps.owner(request)) }));
+  app.delete(route("/keys/:id"), routeOptions, async (request) => {
+    const owner = await deps.owner(request);
+    const { id } = parseQuery(z.object({ id: vaultHandoffKeyIdSchema }).strict(), request.params);
+    if (!await repository().deleteHandoffKey(owner, id)) throw new GitControlError("VAULT_KEY_NOT_FOUND", "This key was not found.", 404);
     return { deleted: true };
   });
 

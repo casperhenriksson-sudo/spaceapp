@@ -54,6 +54,7 @@ import {
   ArrowRightLeft as LucideArrowRightLeft,
   ArrowUp as LucideArrowUp,
   ArrowUpToLine as LucideArrowUpToLine,
+  ChevronsUp as LucideChevronsUp,
   Bell as LucideBell,
   Mail as LucideMail,
   Bookmark as LucideBookmark,
@@ -160,8 +161,12 @@ import {
   Briefcase as LucideBriefcase,
   Megaphone as LucideMegaphone,
   Handshake as LucideHandshake,
+  TabletSmartphone as LucideTabletSmartphone,
+  ShieldHalf as LucideShieldHalf,
   Gavel as LucideGavel,
+  NotebookPen as LucideNotebookPen,
   Blend as LucideBlend,
+  ClipboardCheck as LucideClipboardCheck,
   MessagesSquare as LucideMessagesSquare,
   SquareCode as LucideSquareCode,
   TextCursorInput as LucideTextCursorInput,
@@ -456,8 +461,12 @@ export const lucideIcons = {
   Briefcase: LucideBriefcase,
   Megaphone: LucideMegaphone,
   Handshake: LucideHandshake,
+  TabletSmartphone: LucideTabletSmartphone,
+  ShieldHalf: LucideShieldHalf,
   Gavel: LucideGavel,
+  NotebookPen: LucideNotebookPen,
   Blend: LucideBlend,
+  ClipboardCheck: LucideClipboardCheck,
   MessagesSquare: LucideMessagesSquare,
   SquareCode: LucideSquareCode,
   TextCursorInput: LucideTextCursorInput,
@@ -684,8 +693,12 @@ export const {
   Briefcase,
   Megaphone,
   Handshake,
+  TabletSmartphone,
+  ShieldHalf,
   Gavel,
+  NotebookPen,
   Blend,
+  ClipboardCheck,
   MessagesSquare,
   SquareCode,
   TextCursorInput,
@@ -741,6 +754,8 @@ export const VolumeX = LucideVolumeX;
 export const StickyNote = LucideStickyNote;
 export const ArrowUpToLine = LucideArrowUpToLine;
 export const ArrowDownToLine = LucideArrowDownToLine;
+// Nous conversation: back through the operator's own messages, newest first (operator request 2026-10-21).
+export const ChevronsUp = LucideChevronsUp;
 export const Hash = LucideHash;
 // Data and diff surfaces: Lucide glyphs routed through the shared icon module.
 export const AlignJustify = LucideAlignJustify;

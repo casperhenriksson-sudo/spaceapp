@@ -29,32 +29,41 @@ describe("Nous's follow-ups", () => {
     expect((await f.followups.run("user:someone", { op: "list" }, null)).result).toBe("No follow-ups.");
   });
 
-  it("fires once when the time comes, a ticket ends or a pane finishes, and never after a cancel", async () => {
+  it("fires when the time comes, a ticket ends or a pane finishes, closes only once the turn that saw it completed, and never after a cancel", async () => {
     const f = fixture();
     await f.followups.run(owner, { op: "add", note: "Look at the deploy", inMinutes: 10 }, null);
     await f.followups.run(owner, { op: "add", note: "Merge dev into S3", ticket: "q-20261017-124931-f2cc" }, null);
     await f.followups.run(owner, { op: "add", note: "Read Andy", pane: "Andy" }, { paneId: "pane:andy0001", paneLabel: "Andy" });
     const cancelled = await f.repository.add({ ownerUserId: owner, note: "never", trigger: { kind: "TIME", dueAt: "2026-10-17T13:01:00.000Z" } });
     expect((await f.followups.run(owner, { op: "cancel", followup: cancelled.id }, null)).ok).toBe(true);
-    expect((await f.followups.run(owner, { op: "cancel", followup: cancelled.id }, null)).ok).toBe(false);
+    // Cancelling one that already ended is what cancel wants: ok, with how it ended (review 2026-10-20: 30 failures in 7 days).
+    expect(await f.followups.run(owner, { op: "cancel", followup: cancelled.id }, null)).toMatchObject({ ok: true, result: expect.stringContaining("Already cancelled") });
+    expect(await f.followups.run(owner, { op: "cancel", followup: "nous_followup:000000000000000000000000" }, null)).toMatchObject({ ok: false, result: expect.stringContaining("op list") });
 
     f.tickets.set("q-20261017-124931-f2cc", "VERIFYING");
     expect(await f.followups.tick()).toBe(0);
     f.advance(11 * 60_000);
     f.tickets.set("q-20261017-124931-f2cc", "DEPLOYED");
     expect(await f.followups.tick()).toBe(2);
-    expect(await f.followups.tick()).toBe(0);
+    // Until the turn that carried the line completes, the row stays OPEN and the tick notices the same key again (never doubled).
+    expect(await f.followups.tick()).toBe(2);
     await f.followups.paneFinished("pane:other0001");
-    await f.followups.paneFinished("pane:andy0001");
     await f.followups.paneFinished("pane:andy0001");
 
     // The created time comes from the repository's own clock, so only the part after it is compared.
-    expect(f.notice.mock.calls.map((call) => (call as unknown as [string, string, string])[2].replace(/^Follow-up you set \S+ /, ""))).toEqual([
+    const calls = f.notice.mock.calls as unknown as Array<[string, string, string, () => Promise<void>]>;
+    expect(calls.map((call) => call[2].replace(/^Follow-up you set \S+ /, ""))).toEqual([
+      "(time came): Look at the deploy", "(ticket q-20261017-124931-f2cc DEPLOYED): Merge dev into S3",
       "(time came): Look at the deploy", "(ticket q-20261017-124931-f2cc DEPLOYED): Merge dev into S3", "(Andy finished): Read Andy"
     ]);
-    expect((f.notice.mock.calls[0] as unknown as [string, string])[1]).toMatch(/^followup:nous_followup:/);
-    const listed = (await f.repository.list(owner, 10)).map((item) => item.status);
-    expect(listed.sort()).toEqual(["CANCELLED", "FIRED", "FIRED", "FIRED"]);
+    expect(calls[0]![1]).toMatch(/^followup:nous_followup:/);
+    expect((await f.repository.list(owner, 10)).map((item) => item.status).sort()).toEqual(["CANCELLED", "OPEN", "OPEN", "OPEN"]);
+    // The turn completed: each line's onDone closes its follow-up as FIRED, once; the tick has nothing left.
+    for (const call of calls) await call[3]();
+    expect(await f.followups.tick()).toBe(0);
+    await f.followups.paneFinished("pane:andy0001");
+    expect(calls).toHaveLength(5);
+    expect((await f.repository.list(owner, 10)).map((item) => item.status).sort()).toEqual(["CANCELLED", "FIRED", "FIRED", "FIRED"]);
   });
 
   it("keeps at most 50 open follow-ups per owner", async () => {

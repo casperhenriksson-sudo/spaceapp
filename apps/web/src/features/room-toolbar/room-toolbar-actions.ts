@@ -80,6 +80,9 @@ export interface RoomToolbarActionsContext {
     addMarketingCopilotPane: () => Promise<void>;
     addFreelanceCopilotPane: () => Promise<void>;
     addDesignPane: () => Promise<void>;
+    addAppStudioPane: () => Promise<void>;
+    addSecurityCopilotPane: () => Promise<void>;
+    addVideoPane: () => Promise<void>;
     addLivePane: () => Promise<unknown>;
   };
   tools: {
@@ -130,7 +133,7 @@ export function buildRoomToolbarActions(context: RoomToolbarActionsContext): Ico
   } = context.popovers;
   const { cliFloatsHidden, toggleCliFloats, maskSensitiveData, toggleMaskSensitiveData, isRoomFocusMode, toggleRoomFocusMode, isRoomToolbarHidden, terminalFontSize } = context.preferences;
   const { activeRoom, selectedRoomId, panes, paneLayoutPending, setPaneLayoutError, activeRoomCategoryFilter, activeRoomCategoryColors, cycleRoomCategoryColor } = context.room;
-  const { isCodexEnabled, cliPaneCreationPending, toggleChatLauncher, toggleCliLauncher, addRootAdminPane, addPane, addFilesPane, addDatabasesPane, addDemosPane, addT3CodePane, addJobApplyPane, addMailCopilotPane, addMarketingCopilotPane, addFreelanceCopilotPane, addDesignPane, addLivePane } = context.create;
+  const { isCodexEnabled, cliPaneCreationPending, toggleChatLauncher, toggleCliLauncher, addRootAdminPane, addPane, addFilesPane, addDatabasesPane, addDemosPane, addT3CodePane, addJobApplyPane, addMailCopilotPane, addMarketingCopilotPane, addFreelanceCopilotPane, addDesignPane, addAppStudioPane, addSecurityCopilotPane, addVideoPane, addLivePane } = context.create;
   const { desktopWidgets, openStickyNote, isBrowserFullscreen, captureRoomScreen, reloadRoomWindow } = context.tools;
   const { isSnipToolOpen, setIsSnipToolOpen } = context.tools.snip;
   const { toolbarVpnRoute, vpnCityPending, rotateVpnCityFromToolbar } = context.tools.vpn;
@@ -619,6 +622,48 @@ export function buildRoomToolbarActions(context: RoomToolbarActionsContext): Ico
         onClick: () => {
           if (!activeRoom) return;
           void addDesignPane();
+        },
+        disabled: !activeRoom || panes.length >= 16
+      }]
+    : []),
+  ...(!isPaneHidden("app-studio")
+    ? [{
+        id: "add-app-studio",
+        label: "App Studio",
+        title: "Add App Studio pane",
+        ariaLabel: "Add App Studio pane",
+        icon: modeIcons.APP_STUDIO,
+        onClick: () => {
+          if (!activeRoom) return;
+          void addAppStudioPane();
+        },
+        disabled: !activeRoom || panes.length >= 16
+      }]
+    : []),
+  ...(!isPaneHidden("video")
+    ? [{
+        id: "add-video",
+        label: "Video",
+        title: "Add Video pane",
+        ariaLabel: "Add Video pane",
+        icon: modeIcons.VIDEO,
+        onClick: () => {
+          if (!activeRoom) return;
+          void addVideoPane();
+        },
+        disabled: !activeRoom || panes.length >= 16
+      }]
+    : []),
+  ...(!isPaneHidden("security")
+    ? [{
+        id: "add-security",
+        label: "Security Copilot",
+        title: "Add Security Copilot pane",
+        ariaLabel: "Add Security Copilot pane",
+        icon: modeIcons.SECURITY_COPILOT,
+        onClick: () => {
+          if (!activeRoom) return;
+          void addSecurityCopilotPane();
         },
         disabled: !activeRoom || panes.length >= 16
       }]

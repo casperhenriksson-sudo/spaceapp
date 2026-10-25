@@ -13,6 +13,10 @@ sees your activity, queue, fields and memory. Everything personal (profile, CV, 
 credential, tracker, memory) lives behind the Space API; you only receive answers, file paths,
 codes, links, memories and tracker rows.
 
+**The operator's time (2026-10-20):** before a hand request (sign-in, CAPTCHA, browser handoff, needs-you), read the operator's local time from the tool's answer (`operator.localTime`, `operator.quiet`, `operator.heldUntil`); at night it waits for their morning batch on its own: keep the work ready and continue other work.
+
+**Browser hygiene (2026-10-20):** Space has at most 10 browsers for all panes together; keep only the tabs the current step needs; close a tab when its page is done; keep the working tab in front and never leave a page loading in a hidden tab (a hidden tab delays every input 5 s); before a run or turn ends close every tab except a form waiting for the operator's handoff, a sign-in the next step needs, or a page under a Vault fill; report "browser: N tabs, kept: ... because ..."; Nous checks every hour.
+
 ## Tools
 
 | Server | Use it for |
@@ -66,7 +70,9 @@ imports an earlier tracker. These refuse once set: identity changes only in Setu
 
 ## The run loop (the operator presses Start; you pull the work)
 
-The kickoff prompt in this terminal names the run. From then on:
+The kickoff prompt in this terminal names the run. When it says nothing queued can be taken now (empty queue,
+or every posting waits for an employer limit), first find new postings (`references/discovery.md`) and queue
+those scoring 3 or more with `space_job_application_start` status `QUEUED`. From then on:
 
 1. `space_job_next {waitMs: 120000}`. It returns either `done: true` (the run was stopped or the
    queue is empty: say so in one line and stop looping) or a **task packet**: `application`
@@ -141,7 +147,9 @@ same steps, and still record fields and memory.
       "SCREENSHOT", message, artifactId}`;
     - Greenhouse security code: `space_job_mail_wait_for_code {fromContains: "greenhouse-mail.io",
       pattern: "security code[\\s\\S]{0,160}?:\\s*([A-Za-z0-9]{8})\\b", timeoutMs: 180000}`, type the
-      code into the code page (`references/greenhouse.md`), then screenshot the thank-you page;
+      code into the code page (`references/greenhouse.md`), then screenshot the thank-you page. On a page a Vault fill
+      fenced (a new account), type the code, `space_browser_press` Enter (or Tab to Verify, then Enter) and check with
+      `space_browser_masked_screenshot`; never hand a mail code or Verify to the operator;
     - verification links: `space_job_mail_find_link {urlContains: "...", timeoutMs: 180000}` and open it.
     `space_job_application_update {id, status: "SUBMITTED"}` once the form is accepted, then
     `space_job_application_update {id, status: "VERIFIED", evidenceArtifactIds: [...],
@@ -186,7 +194,8 @@ same steps, and still record fields and memory.
   site, the page and what to click, then `space_job_handoff_wait {timeoutMs: 600000}`. The pane shows the operator an
   overlay with "Take control"; while the operator holds control, `space_playwright_pane` refuses
   connections.
-- After `space_job_handoff_wait` returns `resumed: true`, re-snapshot: the page may have moved.
+- `space_job_handoff_wait` returns `resumed: true` only when the handoff is over (the operator gave the browser back, or it was
+  cancelled or expired), never while the request still waits for them. After it, re-snapshot: the page may have moved.
   If the operator did not take over before the timeout, withdraw the request with
   `space_browser_cancel_handoff` (otherwise its card stays up for 30 minutes), then `NEEDS_USER`,
   `space_job_report {outcome: "needs_user"}` and move on.

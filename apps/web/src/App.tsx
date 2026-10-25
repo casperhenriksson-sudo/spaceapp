@@ -119,14 +119,14 @@ import {
   seedInitialLocalSettingsToServer,
   syncFromServer
 } from "./features/user-settings/user-settings-manager.js";
-import { MAX_ROOMS, type PaneCategoryColor } from "@space/contracts";
+import { type PaneCategoryColor } from "@space/contracts";
 import {
   nextCategoryColor,
   readStoredCategoryFilter,
   roomCategoryColors,
   writeStoredCategoryFilter
 } from "./features/pane-category-color/room-filter.js";
-import { api, SpaceApiError, type McpPayload, type ReadyzPayload } from "./api.js";
+import { api, type McpPayload, type ReadyzPayload } from "./api.js";
 import {
   acknowledgePaneCompletion,
   applyPaneCompletionEvents,
@@ -173,11 +173,11 @@ import {
 } from "./features/browser-pane/events.js";
 import { AppVersionMeta, DemoVersionMeta } from "./features/app-version/AppVersionMeta.js";
 import type { CopilotLaunchChoice } from "./features/copilot-kit/CopilotLaunchDialog.js";
-import { DESIGN_KIND, FREELANCE_COPILOT_KIND, JOB_COPILOT_KIND, MAIL_COPILOT_KIND, MARKETING_COPILOT_KIND, type CopilotKind } from "./features/copilot-kit/copilot-kind.js";
+import { APP_STUDIO_KIND, DESIGN_KIND, FREELANCE_COPILOT_KIND, JOB_COPILOT_KIND, MAIL_COPILOT_KIND, MARKETING_COPILOT_KIND, SECURITY_COPILOT_KIND, VIDEO_KIND, type CopilotKind } from "./features/copilot-kit/copilot-kind.js";
 import { resolveCopilotLaunch } from "./features/copilot-kit/copilot-runtimes.js";
 import { rememberNewPaneAccount } from "./features/cli-accounts/cli-account-memory.js";
 import { forwardCopilotStreamEvents } from "./features/copilot-kit/copilot-stream.js";
-import { forwardNousFocusEvents, useNousFocus } from "./features/nous-focus/NousFocus.js";
+import { forwardNousPaneBoardEvents, useNousFocus } from "./features/nous-focus/NousFocus.js";
 import { HealthDock } from "./features/health/HealthDock.js";
 import {
   AppDiagnosticsGlobalIndicators,
@@ -506,6 +506,7 @@ const LazySetupConnectionsWizard = lazy(() =>
   import("./features/setup-connections/SetupConnectionsWizard.js")
     .then((module) => ({ default: module.SetupConnectionsWizard }))
 );
+const LazyFirstSetupWizard = lazy(() => import("./features/setup-connections/FirstSetupWizard.js").then((module) => ({ default: module.FirstSetupWizard })));
 const LazyEmbeddedDashboardDialog = lazy(() =>
   import("./features/embedded-dashboard/EmbeddedDashboardDialog.js")
     .then((module) => ({ default: module.EmbeddedDashboardDialog }))
@@ -668,13 +669,11 @@ const LazyJobCopilotSettingsCard = lazyWithPreload(() =>
   import("./features/job-apply-pane/JobCopilotSettingsCard.js").then((module) => ({ default: module.JobCopilotSettingsCard })),
   { idle: true }
 );
-const LazyMailCopilotSettingsCard = lazyWithPreload(() =>
-  import("./features/mail-copilot-pane/MailCopilotSettingsCard.js").then((module) => ({ default: module.MailCopilotSettingsCard })),
-  { idle: true }
-);
+const LazyMailCopilotSettingsCard = lazyWithPreload(() => import("./features/mail-copilot-pane/MailCopilotSettingsCard.js").then((module) => ({ default: module.MailCopilotSettingsCard })), { idle: true });
 const LazyMarketingCopilotSettingsCard = lazyWithPreload(() => import("./features/marketing-copilot-pane/MarketingCopilotSettingsCard.js").then((module) => ({ default: module.MarketingCopilotSettingsCard })), { idle: true });
 const LazyFreelanceCopilotSettingsCard = lazyWithPreload(() => import("./features/freelance-copilot-pane/FreelanceCopilotSettingsCard.js").then((module) => ({ default: module.FreelanceCopilotSettingsCard })), { idle: true });
 const LazyDesignSettingsCard = lazyWithPreload(() => import("./features/design-pane/DesignSettingsCard.js").then((module) => ({ default: module.DesignSettingsCard })), { idle: true });
+const LazyAppStudioSettingsCard = lazyWithPreload(() => import("./features/app-studio-pane/AppStudioSettingsCard.js").then((module) => ({ default: module.AppStudioSettingsCard })), { idle: true }); const LazyVideoSettingsCard = lazyWithPreload(() => import("./features/video-pane/VideoSettingsCard.js").then((module) => ({ default: module.VideoSettingsCard })), { idle: true }); const LazySecurityCopilotSettingsCard = lazyWithPreload(() => import("./features/security-copilot-pane/SecurityCopilotSettingsCard.js").then((module) => ({ default: module.SecurityCopilotSettingsCard })), { idle: true });
 const sideSurfaceLoadingFallback = <div className="dock-muted-text" role="status">Loading panel…</div>;
 /** The Settings dock's cards, in the dock's order; their declarations above keep the idle preload order. */
 const agentSettingsCards: AgentSettingsCards = {
@@ -697,7 +696,7 @@ const agentSettingsCards: AgentSettingsCards = {
   Dots: LazyDotsSettingsCard,
   JobCopilot: LazyJobCopilotSettingsCard,
   MailCopilot: LazyMailCopilotSettingsCard,
-  MarketingCopilot: LazyMarketingCopilotSettingsCard, FreelanceCopilot: LazyFreelanceCopilotSettingsCard, Design: LazyDesignSettingsCard
+  MarketingCopilot: LazyMarketingCopilotSettingsCard, FreelanceCopilot: LazyFreelanceCopilotSettingsCard, Design: LazyDesignSettingsCard, AppStudio: LazyAppStudioSettingsCard, Video: LazyVideoSettingsCard, SecurityCopilot: LazySecurityCopilotSettingsCard
 };
 
 const toolbarMenuLoadingFallback = <span className="sr-only" role="status">Loading menu…</span>;
@@ -1091,6 +1090,7 @@ export function App() {
     manageLoginPendingRef, setManageLoginPending, isSetupConnectionsOpen, setIsSetupConnectionsOpen, workspaceSetupHost,
     setWorkspaceSetupHost, workspaceSetupBack, setupFromWorkspace
   } = manage;
+  const [isFirstSetupOpen, setIsFirstSetupOpen] = useState(false);
   const [restoreAllPending, setRestoreAllPending] = useState(false);
   const [minimizeAllPending, setMinimizeAllPending] = useState(false);
   const [isAgentsDashboardOpen, setIsAgentsDashboardOpen] = useState(false);
@@ -1144,7 +1144,6 @@ export function App() {
   const rootRemSize = useRootRemSize();
   const [paneGridWidth, setPaneGridWidth] = useState(() => readViewportWidth());
   const [paneGridHeight, setPaneGridHeight] = useState(0);
-  const [pendingBrowserHandoffPaneId, setPendingBrowserHandoffPaneId] = useState<string | null>(null);
   const [copilotLaunch, setCopilotLaunch] = useState<{ kind: CopilotKind; roomId: string; count: number; preselect: CopilotLaunchSettings | null; notice: string | null } | null>(null);
   const [activeRoomEventStreamStatus, setActiveRoomEventStreamStatus] = useState<ActiveRoomEventStreamStatus>("idle");
   const cliMemorySaveModelId = useMemo(() => pickCliMemorySaveModelId(models), [models]);
@@ -1219,7 +1218,6 @@ export function App() {
   const pendingPaneHeaderFocusIdRef = useRef<string | null>(null);
   const paneColumnAnchorStartsRef = useRef<PaneColumnAnchorMap>(new Map());
   const previousPaneGridColumnCountRef = useRef<number | null>(null);
-  const handledBrowserHandoffEventIdsRef = useRef(new Set<string>());
   const loadRoomRuntimeRef = useRef<(
     roomId: string,
     onPanesLoaded?: () => void,
@@ -2400,10 +2398,8 @@ export function App() {
       scheduleSetupOverviewProbe({
         isMounted: () => appMountedRef.current,
         loadOverview: api.setupOverview,
-        onIncomplete: () => {
-          setupFromWorkspace.current = false;
-          setIsSetupConnectionsOpen(true);
-        },
+        // An unfinished owner setup resumes in First Setup; Setup & connections stays in Manage.
+        onIncomplete: () => setIsFirstSetupOpen(true),
         onError: () => setError((current) => current ?? "Setup status could not be loaded. Open Setup wizard from the room toolbar to finish setup.")
       });
     }
@@ -2713,17 +2709,20 @@ export function App() {
     }
   }
 
+  // First setup applied the owner's settings on the server (tools shown, the tested Live default; review 2026-10-21 #5).
+  const reloadSettingsAfterSetup = () => api.userSettings().then((settings) => { userPreferences.hydrate(settings);
+    if (applyServerUserSettings(runtime.platform.localStorage, settings, uiTheme, modernAppearance, modernIconPack, uiBackground, auth?.user?.id).themeChanged) runtime.platform.reloadPage(); });
+
   async function handleOwnerClaim(input: SetupClaimInput) {
     const nextAuth = await api.claimSetup(input);
     setSetupStatus({ setupRequired: false, expiresAt: null });
-    if (!nextAuth.isOnboardingComplete) {
-      setupFromWorkspace.current = false;
-      setIsSetupConnectionsOpen(true);
-    }
+    if (!nextAuth.isOnboardingComplete) setIsFirstSetupOpen(true);
     await handleLogin(nextAuth);
   }
 
   async function signOut() {
+    // The unlocked Vault keys go with the session (they live for the tab, not the dock); loaded only with the Vault.
+    await import("./features/vault/vault-session.js").then((vault) => vault.lockVaultSession("SIGN_OUT")).catch(() => undefined);
     // A signed-out phone must not keep showing this account's pushes.
     if (pushNotificationsEnabled()) await setPushNotifications(false, api).catch(() => undefined);
     try {
@@ -2743,10 +2742,6 @@ export function App() {
 
   async function createRoom() {
     if (roomCreationPendingRef.current) return;
-    if (rooms.length >= MAX_ROOMS) {
-      setError(`Maximum room limit (${MAX_ROOMS}) reached. Close or delete an existing room to create a new one.`);
-      return;
-    }
     roomCreationPendingRef.current = true;
     setRoomCreationPending(true);
     setError(null);
@@ -3352,7 +3347,7 @@ export function App() {
     }
   }
 
-  async function addPane(mode: Pane["mode"], youtubeUrl?: string, count = 1) {
+  async function addPane(mode: Pane["mode"], youtubeUrl?: string, count = 1, float = false) {
     const roomId = selectedRoomIdRef.current;
     if (
       !roomId ||
@@ -3416,6 +3411,8 @@ export function App() {
         if (mode === "YOUTUBE" && youtubeUrl) {
           registerYouTubeBrowseIntent(pane.id, youtubeUrl);
         }
+        // Batched with setPanes below, so the pane's first frame is already the float.
+        if (mode === "YOUTUBE" && float) toggleYouTubeFloating(pane.id, true);
         if (selectedRoomIdRef.current === roomId) {
           setPanes((current) => [...current.filter((candidate) => candidate.id !== pane.id), pane]);
           setSelectedPaneId(pane.id);
@@ -3904,13 +3901,13 @@ export function App() {
       return new Set();
     }
   });
-  const toggleYouTubeFloating = useCallback((paneId: string) => {
+  const toggleYouTubeFloating = useCallback((paneId: string, float?: boolean) => {
     setFloatingYouTubePaneIds((prev) => {
       const next = new Set(prev);
-      if (next.has(paneId)) {
-        next.delete(paneId);
-      } else {
+      if (float ?? !next.has(paneId)) {
         next.add(paneId);
+      } else {
+        next.delete(paneId);
       }
       try {
         localStorage.setItem("space.youtube.floating.panes.v1", JSON.stringify(Array.from(next)));
@@ -3918,7 +3915,8 @@ export function App() {
       return next;
     });
   }, []);
-  useYouTubeFloatRequest({ panes, activeRoomId: activeRoom?.id ?? null, floatingIds: floatingYouTubePaneIds, toggle: toggleYouTubeFloating });
+  useYouTubeFloatRequest({ panes, activeRoomId: activeRoom?.id ?? null, floatingIds: floatingYouTubePaneIds, toggle: toggleYouTubeFloating,
+    open: () => void addPane("YOUTUBE", undefined, 1, true) });
   const visiblePanes = useMemo(() => {
     const unfiltered = panes.filter((pane) => (shellMode === "mobile" || !pane.isMinimized) && !floatingYouTubePaneIds.has(pane.id));
     return activeRoomCategoryFilter
@@ -4219,32 +4217,6 @@ export function App() {
       replayCreatedRoom = false;
       replayCapabilityStatusChanged = false;
     };
-    const handleBrowserHandoff = (message: MessageEvent<string>) => {
-      const event = parseStreamEvent(message.data);
-      if (
-        !event ||
-        event.type !== "BROWSER_HANDOFF_REQUESTED" ||
-        !event.paneId ||
-        handledBrowserHandoffEventIdsRef.current.has(event.id)
-      ) {
-        return;
-      }
-      handledBrowserHandoffEventIdsRef.current.add(event.id);
-      if (handledBrowserHandoffEventIdsRef.current.size > 500) handledBrowserHandoffEventIdsRef.current.clear();
-      void api.browserHandoff(event.paneId)
-        .then(async ({ handoff }) => {
-          if (handoff?.status !== "REQUESTED") return;
-          activateRoom(handoff.roomId);
-          await loadRoomRuntimeRef.current(handoff.roomId);
-          setSelectedPaneId(handoff.paneId);
-          setPendingBrowserHandoffPaneId(handoff.paneId);
-        })
-        .catch((error: unknown) => {
-          // A closed (409) or deleted (404) pane never comes back; only retry transient failures.
-          if (error instanceof SpaceApiError && (error.status === 404 || error.status === 409)) return;
-          handledBrowserHandoffEventIdsRef.current.delete(event.id);
-        });
-    };
     const handleCapabilityStatusChanged = (message: MessageEvent<string>) => {
       const event = parseStreamEvent(message.data);
       if (!event || event.type !== "CAPABILITY_STATUS_CHANGED") return;
@@ -4257,10 +4229,10 @@ export function App() {
     source.addEventListener("replay-start", handleReplayStart);
     source.addEventListener("replay-complete", handleReplayComplete);
     source.addEventListener("ROOM_CREATED", handleRoomCreated as EventListener);
-    source.addEventListener("BROWSER_HANDOFF_REQUESTED", handleBrowserHandoff as EventListener);
     source.addEventListener("CAPABILITY_STATUS_CHANGED", handleCapabilityStatusChanged as EventListener);
-    // Copilot activity (copilot-kit/copilot-stream.ts) and Nous focus requests (nous-focus) reach the page as window events.
-    const stopWindowStreams = [forwardCopilotStreamEvents(source), forwardNousFocusEvents(source)];
+    // Copilot activity (copilot-kit/copilot-stream.ts) and the Nous pane board's updates (nous-focus) reach the page as window events.
+    // A browser handoff reaches the operator as its notification: the needs-you flow (nous-focus) brings them to the pane and takes control.
+    const stopWindowStreams = [forwardCopilotStreamEvents(source), forwardNousPaneBoardEvents(source)];
     // Notifications travel as ids only; the store reads the owner's records and delivers the new ones.
     const handleNotification = (message: MessageEvent<string>) => {
       const event = parseStreamEvent(message.data);
@@ -4273,7 +4245,6 @@ export function App() {
       source.removeEventListener("replay-start", handleReplayStart);
       source.removeEventListener("replay-complete", handleReplayComplete);
       source.removeEventListener("ROOM_CREATED", handleRoomCreated as EventListener);
-      source.removeEventListener("BROWSER_HANDOFF_REQUESTED", handleBrowserHandoff as EventListener);
       source.removeEventListener("CAPABILITY_STATUS_CHANGED", handleCapabilityStatusChanged as EventListener);
       for (const stop of stopWindowStreams) stop();
       source.removeEventListener("NOTIFICATION_CREATED", handleNotification as EventListener);
@@ -4329,16 +4300,6 @@ export function App() {
     return () => window.removeEventListener(CLI_RUNTIME_VISIBILITY_EVENT, handleCliRuntimeVisibility);
   }, [auth?.isAuthenticated]);
 
-  useEffect(() => {
-    if (!pendingBrowserHandoffPaneId) return;
-    const pendingPane = panes.find((pane) => pane.id === pendingBrowserHandoffPaneId && (pane.mode === "BROWSER" || pane.mode === "YOUTUBE"));
-    if (!pendingPane || pendingPane.isMinimized) {
-      setPendingBrowserHandoffPaneId(null);
-      return;
-    }
-    dispatchBrowserPaneAction(pendingBrowserHandoffPaneId, "handoff");
-    setPendingBrowserHandoffPaneId(null);
-  }, [panes, pendingBrowserHandoffPaneId]);
   const userNavigableRooms = useMemo(() => {
     if (!isAdminMode || adminRoomFilterMode === "mine") {
       return rooms.filter((r) => auth?.user?.role === "USER" || !r.ownerUserId || r.ownerUserId === auth?.user?.id);
@@ -4878,7 +4839,7 @@ export function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activateRoom, sideSurfaces.openSideSurface]);
   useNotificationBootstrap(startupReady ? auth?.user?.id ?? null : null, navigateToNotification);
-  const nousFocus = useNousFocus({ userId: auth?.user?.id ?? null, rooms, panes, selectedRoomId, selectedPaneId, selectRoom, selectPane: setSelectedPaneId, toggleMaximize, restorePane, sideSurfaces });
+  const nousFocus = useNousFocus({ rooms, panes, selectedRoomId, selectedPaneId, selectRoom, selectPane: setSelectedPaneId, toggleMaximize, restorePane, sideSurfaces });
   const roomToolbarActions = useMemo<IconToolbarAction[]>(
     () => {
       return buildRoomToolbarActions({
@@ -4895,7 +4856,7 @@ export function App() {
         },
         create: {
           isCodexEnabled, cliPaneCreationPending, toggleChatLauncher, toggleCliLauncher, addRootAdminPane, addPane, addFilesPane,
-          addDatabasesPane, addDemosPane, addT3CodePane, addJobApplyPane, addMailCopilotPane, addMarketingCopilotPane: () => addCopilotPane(MARKETING_COPILOT_KIND), addFreelanceCopilotPane: () => addCopilotPane(FREELANCE_COPILOT_KIND), addDesignPane: () => addCopilotPane(DESIGN_KIND), addLivePane
+          addDatabasesPane, addDemosPane, addT3CodePane, addJobApplyPane, addMailCopilotPane, addMarketingCopilotPane: () => addCopilotPane(MARKETING_COPILOT_KIND), addFreelanceCopilotPane: () => addCopilotPane(FREELANCE_COPILOT_KIND), addDesignPane: () => addCopilotPane(DESIGN_KIND), addAppStudioPane: () => addCopilotPane(APP_STUDIO_KIND), addVideoPane: () => addCopilotPane(VIDEO_KIND), addSecurityCopilotPane: () => addCopilotPane(SECURITY_COPILOT_KIND), addLivePane
         },
         tools: { desktopWidgets, openStickyNote, isBrowserFullscreen, snip: snipTool, captureRoomScreen, reloadRoomWindow, vpn: toolbarVpn },
         workspace: {
@@ -5136,7 +5097,7 @@ export function App() {
       else if (action.id === "add-t3code") void addT3CodePane(count);
       else if (action.id === "add-jobs") void addJobApplyPane(count);
       else if (action.id === "add-mail") void addMailCopilotPane(count);
-      else if (action.id === "add-marketing" || action.id === "add-freelance" || action.id === "add-design") void addCopilotPane(action.id === "add-marketing" ? MARKETING_COPILOT_KIND : action.id === "add-design" ? DESIGN_KIND : FREELANCE_COPILOT_KIND, count);
+      else if (action.id === "add-marketing" || action.id === "add-freelance" || action.id === "add-design" || action.id === "add-app-studio" || action.id === "add-video" || action.id === "add-security") void addCopilotPane(action.id === "add-marketing" ? MARKETING_COPILOT_KIND : action.id === "add-design" ? DESIGN_KIND : action.id === "add-app-studio" ? APP_STUDIO_KIND : action.id === "add-video" ? VIDEO_KIND : action.id === "add-security" ? SECURITY_COPILOT_KIND : FREELANCE_COPILOT_KIND, count);
       else if (action.id === "add-harness") void addHarnessPane(count);
       else action.onClick();
     }
@@ -6330,7 +6291,7 @@ export function App() {
         ]
       : unorderedTerminalBootstrapPaneIds;
     const layerVisiblePaneCount = (shellMode === "mobile" || layerFullscreenLayout) && layerActivePane ? 1 : layerVisiblePanes.length;
-    const layerHasMaximizedPane = shellMode !== "mobile" && layerVisiblePanes.some((pane) => pane.isMaximized);
+    const layerHasMaximizedPane = shellMode !== "mobile" && !layerFullscreenLayout && layerVisiblePanes.some((pane) => pane.isMaximized);
     const layerHeight = (layerRoom?.paneLayoutHeight ?? 1) as 1 | 2 | 3 | 4;
     const {
       naturalRows: layerNaturalRows,
@@ -6978,6 +6939,9 @@ export function App() {
           />
         </RecoverableSurface>
       ) : null}
+      {isFirstSetupOpen ? <RecoverableSurface fallback={<div className="setup-connections-backdrop" role="status">Loading first setup…</div>}>
+        <LazyFirstSetupWizard client={api} onOpenChange={setIsFirstSetupOpen} onOpenAgentLogin={openSetupConnectionLogin} onFinished={reloadSettingsAfterSetup} roomTheme={roomTheme} colorMode={modernColorMode} />
+      </RecoverableSurface> : null}
       <AppDiagnosticsGlobalIndicators />
       <SensitiveDataMask enabled={maskSensitiveData} />
       <LiveRailSession />

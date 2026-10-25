@@ -9,6 +9,13 @@ test('missing, stale, changed and plan-only evidence all block publication',()=>
  assert.deepEqual(validateEvidence(complete(),context),[]);
  for(const change of [e=>e.candidateDigest='old',e=>e.checks[0].executed=false,e=>e.checks.pop(),e=>e.createdAt='2000-01-01',e=>e.checks.find(x=>x.platform==='windows'&&x.scenario==='upgrade').dataPreserved=false,e=>e.checks.find(x=>x.platform==='windows').interactiveDesktop=false,e=>e.checks.find(x=>x.scenario==='profiles').profilesObserved=['small']]){const e=complete();change(e);assert.ok(validateEvidence(e,context).length);}
 });
+test('no version after 1.1.6 has a Zen exception: the former 1.1.7 label waives nothing',()=>{
+ for(const version of ['1.1.7','1.1.8']){
+  const e=complete();e.launcherVersion=version;e.runtimeVersion=version;e.checks=e.checks.filter(x=>x.scenario!=='first-agent');
+  e.knownExceptions=['linux','windows','macos'].map(platform=>({platform,scenario:'first-agent',decision:'zen-refusal-1.1.7',reason:'OpenCode Zen upstream refusal'}));
+  assert.equal(validateEvidence(e,{digest:'source',version,runtime:version,now}).length,3,version);
+ }
+});
 test('the 1.1.6-only Zen exception (operator decision efc30984) covers only a named first-agent proof of 1.1.6',()=>{
  const v116={digest:'source',version:'1.1.6',runtime:'1.1.6',now};
  const without=(versions)=>{const e=complete();e.launcherVersion=versions;e.runtimeVersion=versions;e.checks=e.checks.filter(x=>x.scenario!=='first-agent');return e;};

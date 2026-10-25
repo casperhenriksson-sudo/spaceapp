@@ -1,10 +1,11 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { describe, expect, it, vi } from 'vitest';
+import { defaultFreelanceCopilotPaneMetadata } from '@space/contracts';
 import { InMemorySpaceStore } from '@space/runtime';
 const mocks = vi.hoisted(() => ({ spawn: vi.fn(), xvfbPid: 0 }));
 vi.mock('node:child_process', async importOriginal => ({ ...await importOriginal<typeof import('node:child_process')>(), spawn: mocks.spawn }));
@@ -30,6 +31,7 @@ async function fixture(mode: 'BROWSER' | 'YOUTUBE' | 'FREELANCE_COPILOT' = 'YOUT
   const cdpMethods: string[] = [];
   const scriptSources: string[] = [];
   let currentUrl: string | null = null;
+  let targets = 0;
   server.on('connection', socket => socket.on('message', data => {
     const { id, method, sessionId, params } = JSON.parse(data.toString());
     cdpMethods.push(method);
@@ -39,8 +41,8 @@ async function fixture(mode: 'BROWSER' | 'YOUTUBE' | 'FREELANCE_COPILOT' = 'YOUT
       const chrome = children.find(child => child.command === process.execPath && child.exitCode === null && child.signalCode === null);
       if (chrome) { chrome.exitCode = 0; chrome.emit('exit', 0, null); }
     }
-    const result = method === 'Target.createTarget' ? { targetId: 'page:test' }
-      : method === 'Target.attachToTarget' ? { sessionId: 'cdp:test' }
+    const result = method === 'Target.createTarget' ? { targetId: `page:test:${++targets}` }
+      : method === 'Target.attachToTarget' ? { sessionId: `cdp:${params.targetId}` }
       : method === 'Page.captureScreenshot' ? { data: 'iVBORw0KGgo=' }
       : method === 'Runtime.evaluate' ? { result: { value: { href: currentUrl === 'about:blank' ? null : currentUrl, title: 'Lifecycle proof', scrollX: 0, scrollY: 0, videoPaused: null } } }
       : {};
@@ -101,6 +103,20 @@ describe('managed browser runtime lifecycle', () => {
       displays.forEach(display => { if (display !== null) releaseDisplay(display); });
     } finally { await f.cleanup(); }
   });
+  it('removes the logins Chrome saved in the profile before launching it, and nothing else', async () => {
+    const f = await fixture('FREELANCE_COPILOT');
+    try {
+      const profile = join(f.session.profilePath, 'Default');
+      await mkdir(profile, { recursive: true });
+      // A saved password is autofilled and reaches an agent's page snapshot (2026-10-19); synthetic files only.
+      for (const name of ['Login Data', 'Login Data-journal', 'Login Data For Account', 'Login Data For Account-wal', 'Cookies', 'Preferences']) {
+        await writeFile(join(profile, name), 'synthetic');
+      }
+      await f.manager.getActive(f.pane);
+      expect(f.children.filter(child => child.command === process.execPath)).toHaveLength(1);
+      expect((await readdir(profile)).sort()).toEqual(['Cookies', 'Preferences']);
+    } finally { await f.cleanup(); }
+  });
   it('finishes late stream cleanup after Chrome exits instead of blocking the next account', async () => {
     const f = await fixture();
     try {
@@ -157,6 +173,40 @@ describe('managed browser runtime lifecycle', () => {
       expect(args.some(arg => arg.startsWith('--proxy-pac-url') || arg.startsWith('--accept-lang'))).toBe(false);
       expect(plain.children.find(child => child.command === process.execPath)?.env?.TZ).toBe(process.env.TZ);
     } finally { await plain.cleanup(); }
+  });
+  it('restarts an account Chrome open without Freelance routes with them; the panes sharing it come back streaming', async () => {
+    const f = await fixture('BROWSER');
+    try {
+      const chromes = () => f.children.filter(child => child.command === process.execPath);
+      const addFreelance = (id: string) => {
+        const pane = f.store.createPane({ roomId: f.pane.roomId, title: id, mode: 'FREELANCE_COPILOT' });
+        f.store.createPaneBrowserSession({ sessionId: `browser_session:${id}`, agentNumber: 2, paneId: pane.id, roomId: f.pane.roomId,
+          profileId: 'profile:lifecycle', profilePath: f.session.profilePath, viewport: 'wide', targetUrl: null, status: 'READY', isActive: true });
+        return pane;
+      };
+      await f.manager.getActive(f.pane);
+      const stream = await f.manager.startFrameStream!(f.session.sessionId, 'REALTIME', () => undefined);
+      expect(chromes()[0]!.args.some(arg => arg.startsWith('--proxy-pac-url'))).toBe(false);
+
+      await f.manager.getActive(addFreelance('freelance'));
+      expect(chromes()).toHaveLength(2);
+      expect(chromes()[0]!.exitCode !== null || chromes()[0]!.signalCode !== null).toBe(true);
+      expect(chromes()[1]!.args.some(arg => arg.startsWith('--proxy-pac-url'))).toBe(true);
+      // The Browser pane rejoins the Freelance Chrome on its own, and its live view streams from it.
+      await vi.waitFor(() => expect(f.cdpMethods.filter(method => method === 'Page.startScreencast')).toHaveLength(2));
+      await f.manager.getActive(f.pane);
+      expect(chromes()).toHaveLength(2);
+      await stream.stop();
+      expect(f.cdpMethods).toContain('Page.stopScreencast');
+      expect(f.manager.capacity?.().activeLiveWorkloads).toBe(0);
+
+      // A second Freelance pane with other routes never restarts the first one's Chrome.
+      const other = addFreelance('freelance-greece');
+      const metadata = defaultFreelanceCopilotPaneMetadata();
+      f.store.updateFreelanceCopilotMetadata(other.id, { ...metadata, settings: { ...metadata.settings, browserEgress: 'greece' } });
+      await expect(f.manager.getActive(other)).rejects.toThrow(/FREELANCE_EGRESS/);
+      expect(chromes()).toHaveLength(2);
+    } finally { await f.cleanup(); }
   });
   it('injects the YouTube ad-block document-start script by default', async () => {
     const f = await fixture();
